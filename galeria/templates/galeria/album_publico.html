@@ -1,0 +1,28 @@
+{% extends "galeria/base.html" %}
+{% block titulo %}{{ album.titulo }}{% endblock %}
+{% block head %}
+<meta property="og:title" content="{{ album.titulo }}">
+<meta property="og:description" content="{{ fotos|length }} foto{{ fotos|length|pluralize }} 360">
+{% with p=album.portada %}{% if p %}<meta property="og:image" content="{{ request.scheme }}://{{ request.get_host }}{{ p.miniatura.url }}">{% endif %}{% endwith %}
+{% endblock %}
+{% block contenido %}
+<header class="barra" style="display:block">
+  <h1>{{ album.titulo }}</h1>
+  {% if album.descripcion %}<p style="margin:6px 0 0">{{ album.descripcion|linebreaksbr }}</p>{% endif %}
+  <p class="suave" style="margin:6px 0 0">{{ fotos|length }} foto{{ fotos|length|pluralize }} 360 · toca una para recorrerla</p>
+</header>
+{% if fotos %}
+<div class="grilla">
+  {% for foto in fotos %}
+  <a class="tarjeta" href="{% url 'visor' album.token foto.uid.hex %}">
+    <img src="{{ foto.miniatura.url }}" alt="Foto 360 {{ forloop.counter }}" loading="lazy">
+    {% if foto.titulo or foto.tomada %}
+    <div class="pie"><span class="suave">{{ foto.titulo|default:"" }}{% if foto.tomada %}{{ foto.tomada|date:"j \d\e F Y" }}{% endif %}</span></div>
+    {% endif %}
+  </a>
+  {% endfor %}
+</div>
+{% else %}
+<p class="suave">Este álbum aún no tiene fotos.</p>
+{% endif %}
+{% endblock %}

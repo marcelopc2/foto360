@@ -1,0 +1,150 @@
+{% extends "galeria/base.html" %}
+{% block titulo %}{{ album.titulo }} · Fotos 360{% endblock %}
+{% block head %}
+<style>
+  .compartir { background: var(--superficie); border: 1px solid var(--borde); border-radius: var(--radio);
+    padding: 14px; display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+  .compartir input { flex: 1 1 260px; font-family: ui-monospace, monospace; font-size: .85rem; }
+  .zona { margin-top: 12px; border: 2px dashed var(--borde); border-radius: var(--radio); padding: 28px 16px;
+    text-align: center; cursor: pointer; }
+  .zona.encima { border-color: var(--acento); }
+  .cola { list-style: none; padding: 0; margin: 12px 0 0; font-size: .9rem; }
+  .cola li { display: flex; justify-content: space-between; gap: 12px; padding: 6px 0;
+    border-bottom: 1px solid var(--borde); }
+  .cola .error { color: var(--peligro); }
+  .cola .ok { color: var(--acento); }
+  .tarjeta .pie { display: flex; justify-content: space-between; align-items: center; gap: 8px; }
+  .tarjeta .pie span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .tarjeta .pie button { padding: 4px 10px; font-size: .85rem; }
+  details { margin-top: 32px; }
+  details summary { cursor: pointer; color: var(--suave); }
+  details form { margin-top: 12px; }
+</style>
+{% endblock %}
+{% block contenido %}
+<header class="barra">
+  <h1><a class="marca" href="{% url 'inicio' %}">Álbumes</a> / {{ album.titulo }}</h1>
+  <a class="boton" href="{% url 'album_publico' album.token %}" target="_blank">Ver como familia</a>
+</header>
+
+<div class="compartir">
+  <input type="text" id="enlace" value="{{ enlace }}" readonly>
+  <button type="button" id="copiar">Copiar link</button>
+  <a class="boton primario" href="https://wa.me/?text={{ album.titulo|urlencode }}%20{{ enlace|urlencode }}" target="_blank">Enviar por WhatsApp</a>
+</div>
+<p class="suave">Quien tenga este link puede ver y descargar las fotos del álbum. No necesita cuenta.</p>
+
+<h2>Subir fotos</h2>
+<label class="zona" id="zona">
+  <input type="file" id="archivos" accept=".jpg,.jpeg,image/jpeg" multiple hidden>
+  <strong>Arrastra aquí tus fotos 360</strong><br>
+  <span class="suave">o toca para elegirlas · JPG exportados desde Insta360 Studio o la app (no .insp)</span>
+</label>
+<ul class="cola" id="cola"></ul>
+
+<h2>Fotos ({{ album.fotos.count }})</h2>
+{% if album.fotos.exists %}
+<div class="grilla">
+  {% for foto in album.fotos.all %}
+  <div class="tarjeta">
+    <a href="{% url 'visor' album.token foto.uid.hex %}" target="_blank"><img src="{{ foto.miniatura.url }}" alt="" loading="lazy"></a>
+    <div class="pie">
+      <span class="suave">{% if foto.tomada %}{{ foto.tomada|date:"j M Y H:i" }}{% else %}{{ foto.nombre_original }}{% endif %}</span>
+      <form method="post" action="{% url 'borrar_foto' foto.pk %}" onsubmit="return confirm('¿Borrar esta foto?')">
+        {% csrf_token %}<button class="peligro" type="submit">Borrar</button>
+      </form>
+    </div>
+  </div>
+  {% endfor %}
+</div>
+{% else %}
+<p class="suave">Todavía no hay fotos en este álbum.</p>
+{% endif %}
+
+<details>
+  <summary>Opciones del álbum</summary>
+  <form method="post">
+    {% csrf_token %}
+    <p><input type="text" name="titulo" value="{{ album.titulo }}" required></p>
+    <p><textarea name="descripcion" rows="2" placeholder="Descripción (opcional, la ve tu familia)">{{ album.descripcion }}</textarea></p>
+    <button type="submit">Guardar</button>
+  </form>
+  <form method="post" action="{% url 'nuevo_enlace' album.pk %}" onsubmit="return confirm('El link actual dejará de funcionar. ¿Seguir?')">
+    {% csrf_token %}<button type="submit">Generar link nuevo</button>
+    <span class="suave">Úsalo si el link llegó a quien no debía.</span>
+  </form>
+  <form method="post" action="{% url 'borrar_album' album.pk %}" onsubmit="return confirm('Se borrará el álbum y todas sus fotos. ¿Seguro?')">
+    {% csrf_token %}<button class="peligro" type="submit">Borrar álbum completo</button>
+  </form>
+</details>
+
+<script>
+(function () {
+  const urlSubir = "{% url 'subir' album.pk %}";
+  const csrf = "{{ csrf_token }}";
+  const zona = document.getElementById("zona");
+  const input = document.getElementById("archivos");
+  const cola = document.getElementById("cola");
+  let pendientes = [], subiendo = false, huboExito = false;
+
+  document.getElementById("copiar").onclick = async function () {
+    const campo = document.getElementById("enlace");
+    try { await navigator.clipboard.writeText(campo.value); } catch (e) { campo.select(); document.execCommand("copy"); }
+    this.textContent = "Copiado";
+    setTimeout(() => (this.textContent = "Copiar link"), 1500);
+  };
+
+  input.onchange = () => agregar(input.files);
+  zona.ondragover = (e) => { e.preventDefault(); zona.classList.add("encima"); };
+  zona.ondragleave = () => zona.classList.remove("encima");
+  zona.ondrop = (e) => { e.preventDefault(); zona.classList.remove("encima"); agregar(e.dataTransfer.files); };
+
+  function agregar(lista) {
+    for (const f of lista) {
+      const li = document.createElement("li");
+      li.innerHTML = "<span></span><span class='suave'>en espera</span>";
+      li.firstChild.textContent = f.name;
+      cola.appendChild(li);
+      pendientes.push({ f, li });
+    }
+    input.value = "";
+    if (!subiendo) siguiente();
+  }
+
+  // De a una: cada foto de la X5 pesa decenas de MB y el server la procesa al recibirla.
+  function siguiente() {
+    const item = pendientes.shift();
+    if (!item) {
+      subiendo = false;
+      if (huboExito) location.reload();
+      return;
+    }
+    subiendo = true;
+    const estado = item.li.lastChild;
+    const datos = new FormData();
+    datos.append("foto", item.f);
+    const xhr = new XMLHttpRequest();
+    xhr.open("POST", urlSubir);
+    xhr.setRequestHeader("X-CSRFToken", csrf);
+    xhr.upload.onprogress = (e) => {
+      if (e.lengthComputable) {
+        const p = Math.round((e.loaded / e.total) * 100);
+        estado.textContent = p < 100 ? p + " %" : "procesando…";
+      }
+    };
+    xhr.onload = () => {
+      let r = {};
+      try { r = JSON.parse(xhr.responseText); } catch (e) {}
+      if (xhr.status === 200 && r.ok) { estado.textContent = "lista"; estado.className = "ok"; huboExito = true; }
+      else {
+        estado.textContent = r.error || (xhr.status === 413 ? "Archivo demasiado grande" : "Error " + xhr.status);
+        estado.className = "error";
+      }
+      siguiente();
+    };
+    xhr.onerror = () => { estado.textContent = "Se cortó la conexión"; estado.className = "error"; siguiente(); };
+    xhr.send(datos);
+  }
+})();
+</script>
+{% endblock %}

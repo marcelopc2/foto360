@@ -1,0 +1,61 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="robots" content="noindex, nofollow">
+  <title>{% block titulo %}Fotos 360{% endblock %}</title>
+  <style>
+    :root {
+      --fondo: #f6f5f2; --superficie: #ffffff; --texto: #1d1d1b; --suave: #6b6a66;
+      --borde: #e2e0db; --acento: #1f5f8b; --peligro: #a33a2b; --radio: 10px;
+    }
+    @media (prefers-color-scheme: dark) {
+      :root {
+        --fondo: #141414; --superficie: #1e1e1d; --texto: #ecebe7; --suave: #9a9893;
+        --borde: #2f2f2d; --acento: #7ab3d9; --peligro: #e07a6b;
+      }
+    }
+    * { box-sizing: border-box; }
+    body { margin: 0; background: var(--fondo); color: var(--texto);
+      font: 16px/1.5 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
+    a { color: var(--acento); }
+    .contenedor { max-width: 1100px; margin: 0 auto; padding: 20px 16px 60px; }
+    header.barra { display: flex; justify-content: space-between; align-items: center; gap: 12px;
+      padding-bottom: 16px; margin-bottom: 20px; border-bottom: 1px solid var(--borde); }
+    header.barra h1 { font-size: 1.25rem; margin: 0; font-weight: 600; }
+    header.barra .marca { color: var(--texto); text-decoration: none; font-weight: 600; }
+    h2 { font-size: 1.1rem; margin: 28px 0 12px; font-weight: 600; }
+    .suave { color: var(--suave); font-size: .9rem; }
+    input[type=text], input[type=password], textarea { width: 100%; padding: 10px 12px; border: 1px solid var(--borde);
+      border-radius: 8px; background: var(--superficie); color: var(--texto); font: inherit; }
+    button, .boton { display: inline-flex; align-items: center; gap: 6px; padding: 9px 16px;
+      border-radius: 8px; border: 1px solid var(--borde); background: var(--superficie);
+      color: var(--texto); font: inherit; font-size: .95rem; cursor: pointer; text-decoration: none; }
+    button.primario, .boton.primario { background: var(--acento); border-color: var(--acento); color: #fff; }
+    @media (prefers-color-scheme: dark) { button.primario, .boton.primario { color: #10202b; } }
+    button.peligro { color: var(--peligro); }
+    form.linea { display: flex; gap: 8px; }
+    form.linea input { flex: 1; }
+    .grilla { display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: 14px; }
+    .tarjeta { background: var(--superficie); border: 1px solid var(--borde); border-radius: var(--radio);
+      overflow: hidden; text-decoration: none; color: inherit; display: block; }
+    .tarjeta img, .tarjeta .vacia { width: 100%; aspect-ratio: 2 / 1; object-fit: cover; display: block;
+      background: var(--borde); }
+    .tarjeta .pie { padding: 10px 12px; }
+    .tarjeta .pie strong { display: block; font-weight: 600; }
+    .avisos { list-style: none; padding: 0; margin: 0 0 16px; }
+    .avisos li { padding: 10px 14px; border-radius: 8px; background: var(--superficie);
+      border: 1px solid var(--borde); }
+  </style>
+  {% block head %}{% endblock %}
+</head>
+<body>
+{% block cuerpo %}
+  <div class="contenedor">
+    {% if messages %}<ul class="avisos">{% for m in messages %}<li>{{ m }}</li>{% endfor %}</ul>{% endif %}
+    {% block contenido %}{% endblock %}
+  </div>
+{% endblock %}
+</body>
+</html>

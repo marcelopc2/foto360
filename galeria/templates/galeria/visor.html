@@ -1,0 +1,102 @@
+{% extends "galeria/base.html" %}
+{% block titulo %}{{ album.titulo }} · {{ posicion }}/{{ fotos|length }}{% endblock %}
+{% block head %}
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/pannellum/2.5.6/pannellum.css">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/pannellum/2.5.6/pannellum.js"></script>
+<style>
+  html, body { height: 100%; overflow: hidden; background: #000; }
+  #pano { position: fixed; inset: 0; }
+  .capa { position: fixed; left: 0; right: 0; display: flex; align-items: center; gap: 8px;
+    padding: 10px 12px; z-index: 10; color: #fff; pointer-events: none; }
+  .capa > * { pointer-events: auto; }
+  .arriba { top: 0; background: linear-gradient(rgba(0,0,0,.55), transparent); }
+  .abajo { bottom: 0; justify-content: center; background: linear-gradient(transparent, rgba(0,0,0,.55));
+    padding-bottom: max(12px, env(safe-area-inset-bottom)); }
+  .capa a, .capa button { color: #fff; background: rgba(0,0,0,.45); border: 1px solid rgba(255,255,255,.25);
+    border-radius: 8px; padding: 8px 12px; font-size: .9rem; text-decoration: none; cursor: pointer; }
+  .capa a.desactivado { opacity: .3; pointer-events: none; }
+  .titulo { flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-size: .95rem; }
+  #giro[hidden] { display: none; }
+  #giro.activo { background: rgba(255,255,255,.9); color: #000; }
+  .pnlm-load-box { background: rgba(0,0,0,.6); }
+  .pnlm-controls-container { top: 64px !important; }
+</style>
+{% endblock %}
+{% block cuerpo %}
+<div id="pano"></div>
+<div class="capa arriba">
+  <a href="{% url 'album_publico' album.token %}">← Álbum</a>
+  <span class="titulo">{{ album.titulo }} · {{ posicion }} de {{ fotos|length }}</span>
+  <a href="{% url 'descargar' album.token foto.uid %}" title="Descargar la foto original">Descargar</a>
+</div>
+<div class="capa abajo">
+  <a href="{% if anterior %}{% url 'visor' album.token anterior.uid.hex %}{% endif %}" class="{% if not anterior %}desactivado{% endif %}" id="ant">‹ Anterior</a>
+  <button type="button" id="giro" hidden>Mover el teléfono</button>
+  <a href="{% if siguiente %}{% url 'visor' album.token siguiente.uid.hex %}{% endif %}" class="{% if not siguiente %}desactivado{% endif %}" id="sig">Siguiente ›</a>
+</div>
+<script>
+(function () {
+  // Elegir resolución según lo que aguante la GPU y la pantalla (las fotos de 8K no caben en muchos teléfonos).
+  let maxTex = 4096;
+  try {
+    const gl = document.createElement("canvas").getContext("webgl");
+    if (gl) maxTex = gl.getParameter(gl.MAX_TEXTURE_SIZE);
+  } catch (e) {}
+  const grande = maxTex >= 8192 && Math.max(screen.width, screen.height) >= 1000;
+  const imagen = grande ? "{{ foto.vista.url }}" : "{{ foto.vista_chica.url }}";
+
+  const visor = pannellum.viewer("pano", {
+    type: "equirectangular",
+    panorama: imagen,
+    preview: "{{ foto.miniatura.url }}",
+    autoLoad: true,
+    autoRotate: -2,
+    autoRotateInactivityDelay: 4000,
+    showControls: true,
+    showZoomCtrl: false,
+    compass: false,
+    hfov: 100,
+    minHfov: 40,
+    maxHfov: 120,
+    strings: {
+      loadingLabel: "Cargando…",
+      loadButtonLabel: "Toca para cargar",
+      bylineLabel: "",
+      genericWebGLError: "Tu navegador no soporta el visor 360.",
+      textureSizeError: "La foto es demasiado grande para este dispositivo.",
+      iOS8WebGLError: "Actualiza tu teléfono para ver fotos 360.",
+      unknownError: "No se pudo cargar la foto.",
+    },
+  });
+
+  // Giroscopio: en iPhone requiere permiso explícito con un toque del usuario.
+  const giro = document.getElementById("giro");
+  if (window.DeviceOrientationEvent && "ontouchstart" in window) {
+    giro.hidden = false;
+    let activo = false;
+    giro.onclick = async () => {
+      if (activo) { visor.stopOrientation(); activo = false; giro.classList.remove("activo"); return; }
+      if (typeof DeviceOrientationEvent.requestPermission === "function") {
+        try { if ((await DeviceOrientationEvent.requestPermission()) !== "granted") return; } catch (e) { return; }
+      }
+      visor.startOrientation();
+      activo = true;
+      giro.classList.add("activo");
+    };
+  }
+
+  // Flechas del teclado para pasar de foto.
+  document.addEventListener("keydown", (e) => {
+    const destino = e.key === "PageDown" || (e.key === "ArrowRight" && e.shiftKey) ? "sig"
+      : e.key === "PageUp" || (e.key === "ArrowLeft" && e.shiftKey) ? "ant" : null;
+    const a = destino && document.getElementById(destino);
+    if (a && a.getAttribute("href")) location.href = a.getAttribute("href");
+  });
+
+  {% if siguiente %}
+  // Precargar la siguiente para que el cambio sea rápido.
+  visor.on("load", () => { new Image().src = grande ? "{{ siguiente.vista.url }}" : "{{ siguiente.vista_chica.url }}"; });
+  {% endif %}
+})();
+</script>
+{% endblock %}
