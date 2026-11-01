@@ -1,10 +1,13 @@
-"""Genera las versiones livianas de una foto 360 (equirectangular 2:1)."""
+"""Genera las versiones livianas de una foto 360 (equirectangular 2:1); une los .insp."""
 from datetime import datetime
 from io import BytesIO
 
 from django.core.files.base import ContentFile
 from django.utils import timezone
+import numpy as np
 from PIL import Image, ImageOps
+
+from . import unir
 
 # La X5 exporta 11904x5952 (72 MP); el límite por defecto de Pillow es ~89 MP.
 Image.MAX_IMAGE_PIXELS = 200_000_000
@@ -35,6 +38,13 @@ def _fecha_exif(img):
     return None
 
 
+def _sin_unir(img):
+    """Los .insp son dos ojos de pez lado a lado: esquinas y centro-arriba/abajo negros."""
+    chica = img.resize((64, 32))
+    puntos = ((0, 0), (63, 0), (0, 31), (63, 31), (31, 0), (31, 31))
+    return all(sum(chica.getpixel(p)) < 15 for p in puntos)
+
+
 def procesar(foto, archivo):
     """Llena los campos de imagen de `foto` (sin guardarla) a partir del archivo subido."""
     try:
@@ -53,18 +63,23 @@ def procesar(foto, archivo):
             "Expórtala desde Insta360 Studio o la app como JPG 360 (proporción 2:1)."
         )
 
-    # Los .insp sin exportar son dos ojos de pez lado a lado: esquinas negras.
-    chica = img.resize((64, 32))
-    esquinas = [chica.getpixel(p) for p in ((0, 0), (63, 0), (0, 31), (63, 31), (31, 0), (31, 31))]
-    if all(sum(px) < 15 for px in esquinas):
-        raise FotoInvalida(
-            "Parece una foto sin unir (dos círculos). Expórtala primero como foto 360 desde Insta360 Studio o la app."
-        )
-
-    foto.ancho, foto.alto = img.size
     foto.tomada = fecha
     archivo.seek(0)
-    foto.original.save("o.jpg", archivo, save=False)
+    if _sin_unir(img):
+        # .insp tal como sale de la cámara: dos ojos de pez. Lo unimos aquí.
+        datos = archivo.read()
+        try:
+            img = Image.fromarray(unir.unir(datos, np.asarray(img)))
+        except unir.SinCalibracion as e:
+            raise FotoInvalida(
+                "La foto viene sin unir y no trae la calibración de la cámara. "
+                "Expórtala como foto 360 desde Insta360 Studio o la app."
+            ) from e
+        foto.original.save("o.jpg", _jpeg(img, img.width, 92), save=False)
+    else:
+        foto.original.save("o.jpg", archivo, save=False)
+
+    foto.ancho, foto.alto = img.size
     foto.vista.save("v.jpg", _jpeg(img, TAMANOS["vista"], 85), save=False)
     foto.vista_chica.save("c.jpg", _jpeg(img, TAMANOS["vista_chica"], 82), save=False)
     foto.miniatura.save("t.jpg", _jpeg(img, TAMANOS["miniatura"], 78), save=False)

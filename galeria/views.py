@@ -10,7 +10,7 @@ from django.views.decorators.http import require_POST
 from .imagenes import FotoInvalida, procesar
 from .models import Album, Foto, nuevo_token
 
-EXTENSIONES = (".jpg", ".jpeg")
+EXTENSIONES = (".jpg", ".jpeg", ".insp")
 
 
 # ---------- Administración (solo tú) ----------
@@ -48,7 +48,7 @@ def subir(request, pk):
         return JsonResponse({"ok": False, "error": "No llegó ningún archivo."}, status=400)
     if not archivo.name.lower().endswith(EXTENSIONES):
         return JsonResponse(
-            {"ok": False, "error": "Solo JPG. Los .insp hay que exportarlos primero desde Insta360 Studio o la app."},
+            {"ok": False, "error": "Solo fotos .insp (directo de la cámara) o .jpg 360."},
             status=400,
         )
     foto = Foto(album=album, nombre_original=archivo.name[:255])
@@ -129,5 +129,6 @@ def visor(request, token, uid):
 def descargar(request, token, uid):
     album = get_object_or_404(Album, token=token)
     foto = get_object_or_404(Foto, album=album, uid=uid)
-    nombre = foto.nombre_original or f"{foto.uid.hex}.jpg"
+    base = (foto.nombre_original or foto.uid.hex).rsplit(".", 1)[0]
+    nombre = f"{base}.jpg"
     return FileResponse(foto.original.open("rb"), as_attachment=True, filename=nombre)

@@ -36,9 +36,9 @@
 
 <h2>Subir fotos</h2>
 <label class="zona" id="zona">
-  <input type="file" id="archivos" accept=".jpg,.jpeg,image/jpeg" multiple hidden>
+  <input type="file" id="archivos" accept=".insp,.jpg,.jpeg,image/jpeg" multiple hidden>
   <strong>Arrastra aquí tus fotos 360</strong><br>
-  <span class="suave">o toca para elegirlas · JPG exportados desde Insta360 Studio o la app (no .insp)</span>
+  <span class="suave">o toca para elegirlas · los .insp tal como salen de la cámara (o .jpg 360)</span>
 </label>
 <ul class="cola" id="cola"></ul>
 
@@ -129,7 +129,7 @@
     xhr.upload.onprogress = (e) => {
       if (e.lengthComputable) {
         const p = Math.round((e.loaded / e.total) * 100);
-        estado.textContent = p < 100 ? p + " %" : "procesando…";
+        estado.textContent = p < 100 ? p + " %" : "uniendo y nivelando…";
       }
     };
     xhr.onload = () => {
