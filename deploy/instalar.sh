@@ -1,12 +1,12 @@
 #!/usr/bin/env bash
 # Instalación inicial de visor360 en el servidor. Se corre UNA vez, con sudo:
-#   sudo bash ~/visor360_src/deploy/instalar.sh fotos360.duckdns.org
+#   curl -fsSL https://raw.githubusercontent.com/marcelopc2/foto360/main/deploy/instalar.sh -o /tmp/instalar.sh && sudo bash /tmp/instalar.sh foto360.duckdns.org
 # Solo crea cosas nuevas (carpeta, servicio y sitio "visor360"); no toca zezen, calculadora ni soledad.
 set -euo pipefail
 
 DOMINIO="${1:?Uso: sudo bash instalar.sh <dominio>}"
 USUARIO=marcelo
-SRC="/home/$USUARIO/visor360_src"
+REPO=https://github.com/marcelopc2/foto360.git
 APP=/var/www/visor360
 
 [ "$(id -u)" = 0 ] || { echo "Correr con sudo"; exit 1; }
@@ -14,9 +14,9 @@ APP=/var/www/visor360
 
 echo "== Archivos"
 mkdir -p "$APP"
-rsync -a --exclude venv --exclude deploy "$SRC/" "$APP/"
-mkdir -p "$APP/media"
-chown -R "$USUARIO:$USUARIO" "$APP"
+chown "$USUARIO:$USUARIO" "$APP"
+[ -d "$APP/.git" ] || sudo -u "$USUARIO" git clone -q "$REPO" "$APP"
+sudo -u "$USUARIO" mkdir -p "$APP/media"
 
 echo "== Entorno Python"
 sudo -u "$USUARIO" bash -c "

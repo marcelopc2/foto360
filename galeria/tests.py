@@ -5,6 +5,7 @@ from io import BytesIO
 from django.contrib.auth.models import User
 from django.core.files.uploadedfile import SimpleUploadedFile
 from django.test import TestCase, override_settings
+from django.utils import timezone
 from PIL import Image, ImageDraw
 
 from .models import Album, Foto
@@ -106,6 +107,7 @@ class GaleriaTests(TestCase):
         self.assertGreater(unida.getpixel((10, 372))[2], 150)
         r = self.client.get(f"/a/{self.album.token}/{foto.uid}/descargar/")
         self.assertIn('IMG_20250904_172646_00_021.jpg', r["Content-Disposition"])
+        self.assertEqual(timezone.localtime(foto.tomada).strftime("%Y-%m-%d %H:%M"), "2025-09-04 17:26")
 
     def test_insp_sin_calibracion(self):
         img = Image.new("RGB", (1488, 744))

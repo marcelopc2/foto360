@@ -22,6 +22,8 @@
 </style>
 {% endblock %}
 {% block contenido %}
+{% load static %}
+<script src="{% static 'galeria/unir360.js' %}"></script>
 <header class="barra">
   <h1><a class="marca" href="{% url 'inicio' %}">Álbumes</a> / {{ album.titulo }}</h1>
   <a class="boton" href="{% url 'album_publico' album.token %}" target="_blank">Ver como familia</a>
@@ -111,8 +113,8 @@
     if (!subiendo) siguiente();
   }
 
-  // De a una: cada foto de la X5 pesa decenas de MB y el server la procesa al recibirla.
-  function siguiente() {
+  // De a una: cada foto de la X5 pesa decenas de MB.
+  async function siguiente() {
     const item = pendientes.shift();
     if (!item) {
       subiendo = false;
@@ -121,15 +123,27 @@
     }
     subiendo = true;
     const estado = item.li.lastChild;
+    let archivo = item.f;
+    // Los .insp se unen aquí mismo con la GPU y se sube el JPG listo.
+    // Si este navegador no puede, se sube el .insp y lo une el servidor.
+    if (/\.insp$/i.test(archivo.name) && window.unirInsp) {
+      estado.textContent = "uniendo…";
+      try {
+        const jpg = await window.unirInsp(archivo);
+        archivo = new File([jpg], archivo.name.replace(/\.insp$/i, ".jpg"), { type: "image/jpeg" });
+      } catch (e) {
+        console.warn("No se pudo unir en el navegador, lo hará el servidor:", e);
+      }
+    }
     const datos = new FormData();
-    datos.append("foto", item.f);
+    datos.append("foto", archivo);
     const xhr = new XMLHttpRequest();
     xhr.open("POST", urlSubir);
     xhr.setRequestHeader("X-CSRFToken", csrf);
     xhr.upload.onprogress = (e) => {
       if (e.lengthComputable) {
         const p = Math.round((e.loaded / e.total) * 100);
-        estado.textContent = p < 100 ? p + " %" : "uniendo y nivelando…";
+        estado.textContent = p < 100 ? "subiendo " + p + " %" : "procesando…";
       }
     };
     xhr.onload = () => {

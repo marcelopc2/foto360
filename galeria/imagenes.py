@@ -1,4 +1,5 @@
 """Genera las versiones livianas de una foto 360 (equirectangular 2:1); une los .insp."""
+import re
 from datetime import datetime
 from io import BytesIO
 
@@ -38,6 +39,17 @@ def _fecha_exif(img):
     return None
 
 
+def _fecha_nombre(nombre):
+    """La cámara nombra los archivos IMG_20250904_172646_00_021: sirve si el JPG no trae EXIF."""
+    m = re.search(r"(\d{8})_(\d{6})", nombre or "")
+    if m:
+        try:
+            return timezone.make_aware(datetime.strptime("".join(m.groups()), "%Y%m%d%H%M%S"))
+        except ValueError:
+            pass
+    return None
+
+
 def _sin_unir(img):
     """Los .insp son dos ojos de pez lado a lado: esquinas y centro-arriba/abajo negros."""
     chica = img.resize((64, 32))
@@ -52,7 +64,7 @@ def procesar(foto, archivo):
         img.verify()
         archivo.seek(0)
         img = Image.open(archivo)
-        fecha = _fecha_exif(img)
+        fecha = _fecha_exif(img) or _fecha_nombre(getattr(archivo, "name", ""))
         img = ImageOps.exif_transpose(img).convert("RGB")
     except Exception as e:
         raise FotoInvalida("El archivo no es una imagen válida.") from e
