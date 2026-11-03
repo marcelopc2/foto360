@@ -111,7 +111,10 @@
       this.gl = gl;
       this.yaw = 0;
       this.pitchUsuario = 0;
-      this.polo = -1; // -1: mini mundo (mirar al suelo), +1: bola (mirar al cielo)
+      // Inclinación con el zoom alejado: -90 mira al suelo (mini mundo), +90 al cielo (bola).
+      // Como en la app de Insta360, arrastrar en vertical la mueve de un extremo al otro.
+      this.pitchLejos = this.pitchLejosDestino = -90;
+      this.s = 0;
       this.z = this.zDestino = MODOS.normal;
       this.recto = opciones.recto !== false;
       this.giro = null;
@@ -178,8 +181,8 @@
     cambiarModo(nombre) {
       if (!(nombre in MODOS)) return;
       if (this.giro && nombre !== "normal") return;
-      if (nombre === "planeta") this.polo = -1;
-      if (nombre === "cristal") this.polo = 1;
+      if (nombre === "planeta") this.pitchLejosDestino = -90;
+      if (nombre === "cristal") this.pitchLejosDestino = 90;
       this.zDestino = MODOS[nombre];
       this._tocar();
     }
@@ -190,7 +193,7 @@
       if (this.giro) z = Math.min(z, 0.4);
       // Al empezar a alejarse más allá del gran angular se decide si sale mini mundo o bola,
       // según si se estaba mirando hacia abajo o hacia arriba.
-      if (this.zDestino < 0.45 && z >= 0.45) this.polo = this.pitchUsuario > 20 ? 1 : -1;
+      if (this.zDestino < 0.45 && z >= 0.45) this.pitchLejos = this.pitchLejosDestino = this.pitchUsuario > 20 ? 90 : -90;
       this.zDestino = z;
       this._tocar();
     }
@@ -269,7 +272,13 @@
           const { fov, d } = enCurva(this.z);
           const grados = (d > 0.5 ? fov / 3 : fov) / Math.min(c.clientWidth, c.clientHeight);
           this.yaw -= dx * grados * RAD;
-          this.pitchUsuario = Math.max(-90, Math.min(90, this.pitchUsuario + dy * grados));
+          if (this.s > 0.5) {
+            // Alejado: el arrastre vertical inclina entre mini mundo y bola (media pantalla ≈ 90°).
+            const p = Math.max(-90, Math.min(90, this.pitchLejosDestino + dy * 180 / Math.min(c.clientWidth, c.clientHeight)));
+            this.pitchLejos = this.pitchLejosDestino = p;
+          } else {
+            this.pitchUsuario = Math.max(-90, Math.min(90, this.pitchUsuario + dy * grados));
+          }
         }
         this._tocar();
       });
@@ -305,7 +314,8 @@
       if (Math.abs(this.zDestino - this.z) < 1e-4) this.z = this.zDestino;
       if (this.autoRotar && !this.giro && t - this.ultimaInteraccion > 4000) this.yaw += 0.00025 * dt;
 
-      const modo = this.zDestino < 0.42 ? "normal" : this.zDestino < 0.7 ? "angular" : this.polo > 0 ? "cristal" : "planeta";
+      this.pitchLejos += (this.pitchLejosDestino - this.pitchLejos) * (1 - Math.exp(-dt / 90));
+      const modo = this.zDestino < 0.42 ? "normal" : this.zDestino < 0.7 ? "angular" : this.pitchLejosDestino > 0 ? "cristal" : "planeta";
       if (modo !== this.modoActual) {
         this.modoActual = modo;
         this.alCambiarModo(modo);
@@ -314,8 +324,8 @@
 
       const { fov, d } = enCurva(this.z);
       // Al alejarse, la vista gira sola hacia el suelo (mini mundo) o el cielo (bola).
-      const s = suave(0.42, 0.72, this.z);
-      const pitch = this.pitchUsuario + (this.polo * 90 - this.pitchUsuario) * s;
+      const s = (this.s = suave(0.42, 0.72, this.z));
+      const pitch = this.pitchUsuario + (this.pitchLejos - this.pitchUsuario) * s;
       const mezcla = this.recto ? suave(0.45, 0.72, this.z) : 1;
       const dP = suave(0.15, 0.5, this.z);
 
