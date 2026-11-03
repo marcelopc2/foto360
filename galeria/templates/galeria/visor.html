@@ -7,66 +7,155 @@
   html, body { height: 100%; overflow: hidden; background: #000; }
   #pano { position: fixed; inset: 0; cursor: grab; }
   #pano:active { cursor: grabbing; }
-  .capa { position: fixed; z-index: 10; display: flex; align-items: center; gap: 8px; color: #fff; }
-  .arriba { top: 0; left: 0; right: 0; padding: 10px 12px; padding-top: max(10px, env(safe-area-inset-top)); }
-  .abajo { bottom: 0; left: 0; right: 0; justify-content: center; padding: 10px 12px;
-    padding-bottom: max(12px, env(safe-area-inset-bottom)); }
-  .lado { top: 50%; transform: translateY(-50%); flex-direction: column; right: 12px; }
-  .capa a, .capa button { color: #fff; background: rgba(0,0,0,.5); border: 1px solid rgba(255,255,255,.22);
-    border-radius: 8px; padding: 8px 12px; font: inherit; font-size: .9rem; text-decoration: none; cursor: pointer;
-    min-width: 40px; text-align: center; }
-  .capa a.desactivado { opacity: .3; pointer-events: none; }
-  .titulo { flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-size: .95rem;
-    text-shadow: 0 1px 2px rgba(0,0,0,.6); }
-  .modos { display: inline-flex; border: 1px solid rgba(255,255,255,.22); border-radius: 8px; overflow: hidden; }
-  .modos button { border: 0; border-radius: 0; background: rgba(0,0,0,.5); }
-  .modos button + button { border-left: 1px solid rgba(255,255,255,.22); }
-  .capa button[aria-pressed="true"] { background: rgba(255,255,255,.92); color: #000; }
-  #aviso { position: fixed; inset: 0; display: grid; place-items: center; color: #ddd; z-index: 5; pointer-events: none; }
+  #aviso { position: fixed; inset: 0; display: grid; place-items: center; color: var(--suave); z-index: 5; pointer-events: none; }
   [hidden] { display: none !important; }
-  @media (max-width: 520px) {
-    .modos button { padding: 8px 9px; font-size: .85rem; }
-    .lado { top: auto; bottom: 64px; transform: none; }
+
+  .flota { position: fixed; z-index: 10; }
+  .vidrio { background: rgba(26, 26, 29, .78); backdrop-filter: blur(14px); -webkit-backdrop-filter: blur(14px);
+    border: 1px solid rgba(255, 255, 255, .07); }
+  .redondo { width: 44px; height: 44px; border-radius: 50%; display: grid; place-items: center; color: var(--texto);
+    cursor: pointer; border: 1px solid rgba(255, 255, 255, .07); background: rgba(26, 26, 29, .78);
+    backdrop-filter: blur(14px); -webkit-backdrop-filter: blur(14px); font: inherit; padding: 0; transition: background .15s; }
+  .redondo:hover { background: rgba(48, 48, 53, .9); }
+  .redondo[aria-pressed="true"] { background: var(--ambar); color: var(--sobre-ambar); border-color: var(--ambar); }
+  .redondo.desactivado { opacity: .35; pointer-events: none; }
+
+  /* Arriba */
+  .arriba { top: max(12px, env(safe-area-inset-top)); left: 12px; right: 12px; display: flex; align-items: center; gap: 10px; }
+  .arriba .titulo { flex: 1; min-width: 0; padding: 7px 16px; border-radius: 999px; line-height: 1.25; }
+  .arriba .titulo strong { display: block; font-weight: 500; font-size: .95rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .arriba .titulo span { font-size: .75rem; color: var(--suave); }
+
+  /* Riel derecho y flecha izquierda */
+  .riel { right: 12px; top: 50%; transform: translateY(-50%); display: flex; flex-direction: column; gap: 8px; }
+  .flecha { left: 12px; top: 50%; transform: translateY(-50%); }
+
+  /* Barra inferior con botón central */
+  .dock { left: 50%; transform: translateX(-50%); bottom: max(14px, env(safe-area-inset-bottom));
+    display: flex; align-items: center; gap: 2px; padding: 6px; border-radius: 26px; }
+  .modo { display: grid; justify-items: center; gap: 2px; min-width: 68px; padding: 7px 8px 6px; border: 0; border-radius: 20px;
+    background: transparent; color: var(--suave); font: inherit; font-size: .7rem; cursor: pointer; transition: color .15s, background .15s;
+    white-space: nowrap; }
+  .modo svg { width: 22px; height: 22px; }
+  .modo:hover { color: var(--texto); }
+  .modo[aria-pressed="true"] { color: var(--ambar); background: rgba(244, 183, 64, .1); }
+  .fab { width: 58px; height: 58px; margin: -22px 8px 0; border-radius: 50%; display: grid; place-items: center; border: 4px solid var(--fondo);
+    background: var(--ambar); color: var(--sobre-ambar); cursor: pointer; box-shadow: 0 6px 20px rgba(244, 183, 64, .28); transition: transform .12s; }
+  .fab:active { transform: scale(.94); }
+  .fab svg { width: 26px; height: 26px; }
+
+  /* Encuadre */
+  #marco { position: fixed; z-index: 6; pointer-events: none; border: 1.5px solid rgba(255, 255, 255, .9);
+    box-shadow: 0 0 0 100vmax rgba(8, 8, 10, .58); transition: width .25s ease, height .25s ease, left .25s ease, top .25s ease; }
+  #marco i { position: absolute; background: rgba(255, 255, 255, .35); }
+  #marco i:nth-child(1) { left: 33.333%; top: 0; bottom: 0; width: 1px; }
+  #marco i:nth-child(2) { left: 66.666%; top: 0; bottom: 0; width: 1px; }
+  #marco i:nth-child(3) { top: 33.333%; left: 0; right: 0; height: 1px; }
+  #marco i:nth-child(4) { top: 66.666%; left: 0; right: 0; height: 1px; }
+  #marco b { position: absolute; width: 18px; height: 18px; border: 3px solid var(--ambar); }
+  #marco b:nth-of-type(1) { left: -3px; top: -3px; border-right: 0; border-bottom: 0; }
+  #marco b:nth-of-type(2) { right: -3px; top: -3px; border-left: 0; border-bottom: 0; }
+  #marco b:nth-of-type(3) { left: -3px; bottom: -3px; border-right: 0; border-top: 0; }
+  #marco b:nth-of-type(4) { right: -3px; bottom: -3px; border-left: 0; border-top: 0; }
+  #marco .formato { position: absolute; top: 10px; left: 50%; transform: translateX(-50%); padding: 3px 10px; border-radius: 999px;
+    background: rgba(16, 16, 18, .7); font-size: .75rem; color: var(--texto); }
+
+  .hoja { left: 50%; transform: translateX(-50%); bottom: max(14px, env(safe-area-inset-bottom)); width: min(560px, calc(100% - 24px));
+    padding: 14px; border-radius: 26px; display: grid; gap: 12px; }
+  .formatos { display: flex; gap: 8px; overflow-x: auto; scrollbar-width: none; padding-bottom: 2px; }
+  .formatos::-webkit-scrollbar { display: none; }
+  .formatos .chip { color: var(--texto); border-color: rgba(255, 255, 255, .12); }
+  .acciones { display: grid; grid-template-columns: 1fr auto 1fr; align-items: center; }
+  .acciones .izq { justify-self: start; display: flex; gap: 8px; }
+  .acciones .der { justify-self: end; }
+  .obturador { width: 68px; height: 68px; border-radius: 50%; border: 0; padding: 0; cursor: pointer; background: transparent;
+    display: grid; place-items: center; }
+  .obturador span { width: 68px; height: 68px; border-radius: 50%; border: 4px solid var(--texto); display: grid; place-items: center; }
+  .obturador span::after { content: ""; width: 52px; height: 52px; border-radius: 50%; background: var(--ambar); transition: transform .12s; }
+  .obturador:active span::after { transform: scale(.88); }
+  .obturador[disabled] { opacity: .5; cursor: wait; }
+
+  #flash { position: fixed; inset: 0; z-index: 30; background: #fff; opacity: 0; pointer-events: none; }
+  #flash.on { animation: flash .45s ease-out; }
+  @keyframes flash { 0% { opacity: .75; } 100% { opacity: 0; } }
+  #toast { left: 50%; top: calc(max(12px, env(safe-area-inset-top)) + 58px); transform: translateX(-50%); padding: 10px 16px; border-radius: 999px;
+    font-size: .88rem; display: flex; align-items: center; gap: 8px; z-index: 20; }
+  #toast .ok { width: 8px; height: 8px; border-radius: 50%; background: var(--ok); }
+
+  @media (max-width: 560px) {
+    .modo { min-width: 54px; padding: 7px 4px 6px; font-size: .64rem; }
+    .fab { margin: -22px 4px 0; }
+    .riel { top: auto; bottom: calc(max(14px, env(safe-area-inset-bottom)) + 86px); transform: none; }
+    .flecha { top: auto; bottom: calc(max(14px, env(safe-area-inset-bottom)) + 86px); transform: none; }
+    body.encuadrando .riel, body.encuadrando .flecha { display: none; }  /* el zoom se hace con dos dedos */
   }
 </style>
 {% endblock %}
 {% block cuerpo %}
 <div id="pano"></div>
 <div id="aviso">Cargando…</div>
+<div id="marco" hidden><i></i><i></i><i></i><i></i><b></b><b></b><b></b><b></b><span class="formato" id="formatoTxt"></span></div>
+<div id="flash"></div>
 
-<div class="capa arriba">
-  <a href="{% url 'album_publico' album.token %}">← Álbum</a>
-  <span class="titulo">{{ album.titulo }} · {{ posicion }} de {{ fotos|length }}</span>
-  <a href="{% url 'descargar' album.token foto.uid %}" title="Descargar la foto original">Descargar</a>
-</div>
-
-<div class="capa lado">
-  <button type="button" id="mas" title="Acercar">+</button>
-  <button type="button" id="menos" title="Alejar">−</button>
-  <button type="button" id="recto" title="Enderezar las líneas en las vistas anchas (dewarp)" aria-pressed="true">Recto</button>
-  <button type="button" id="completa" title="Pantalla completa">⛶</button>
-  <button type="button" id="giro" title="Mirar moviendo el teléfono" aria-pressed="false" hidden>Mover</button>
-</div>
-
-<div class="capa abajo">
-  <a href="{% if anterior %}{% url 'visor' album.token anterior.uid.hex %}{% endif %}" class="{% if not anterior %}desactivado{% endif %}" id="ant" title="Foto anterior">‹</a>
-  <div class="modos" role="group" aria-label="Vista">
-    <button type="button" data-modo="normal" aria-pressed="true">Normal</button>
-    <button type="button" data-modo="angular" aria-pressed="false">Angular</button>
-    <button type="button" data-modo="planeta" aria-pressed="false">Mini mundo</button>
-    <button type="button" data-modo="cristal" aria-pressed="false">Bola</button>
+<header class="flota arriba">
+  <a class="redondo" href="{% url 'album_publico' album.token %}" title="Volver al álbum" aria-label="Volver al álbum"><svg class="i"><use href="#i-atras"/></svg></a>
+  <div class="titulo vidrio">
+    <strong>{{ album.titulo }}</strong>
+    <span>{{ posicion }} de {{ fotos|length }}{% if foto.tomada %} · {{ foto.tomada|date:"j M Y" }}{% endif %}</span>
   </div>
-  <a href="{% if siguiente %}{% url 'visor' album.token siguiente.uid.hex %}{% endif %}" class="{% if not siguiente %}desactivado{% endif %}" id="sig" title="Foto siguiente">›</a>
+  <a class="redondo" href="{% url 'descargar' album.token foto.uid %}" title="Descargar la foto 360 completa" aria-label="Descargar la foto 360 completa"><svg class="i"><use href="#i-bajar"/></svg></a>
+</header>
+
+<a class="flota redondo flecha {% if not anterior %}desactivado{% endif %}" id="ant" href="{% if anterior %}{% url 'visor' album.token anterior.uid.hex %}{% endif %}" title="Foto anterior" aria-label="Foto anterior"><svg class="i"><use href="#i-atras"/></svg></a>
+
+<div class="flota riel">
+  <a class="redondo {% if not siguiente %}desactivado{% endif %}" id="sig" href="{% if siguiente %}{% url 'visor' album.token siguiente.uid.hex %}{% endif %}" title="Foto siguiente" aria-label="Foto siguiente"><svg class="i"><use href="#i-adelante"/></svg></a>
+  <button type="button" class="redondo" id="mas" title="Acercar" aria-label="Acercar"><svg class="i"><use href="#i-mas"/></svg></button>
+  <button type="button" class="redondo" id="menos" title="Alejar" aria-label="Alejar"><svg class="i"><use href="#i-menos"/></svg></button>
+  <button type="button" class="redondo" id="recto" title="Recto: endereza las líneas en las vistas anchas" aria-label="Enderezar líneas" aria-pressed="true"><svg class="i"><use href="#i-recto"/></svg></button>
+  <button type="button" class="redondo" id="completa" title="Pantalla completa" aria-label="Pantalla completa"><svg class="i"><use href="#i-completa"/></svg></button>
+  <button type="button" class="redondo" id="giro" title="Mirar moviendo el teléfono" aria-label="Mirar moviendo el teléfono" aria-pressed="false" hidden><svg class="i"><use href="#i-mover"/></svg></button>
 </div>
+
+<nav class="flota dock vidrio" id="dock" aria-label="Vista">
+  <button type="button" class="modo" data-modo="normal" aria-pressed="true"><svg class="i"><use href="#i-normal"/></svg>Normal</button>
+  <button type="button" class="modo" data-modo="angular" aria-pressed="false"><svg class="i"><use href="#i-angular"/></svg>Angular</button>
+  <button type="button" class="fab" id="abrirEncuadre" title="Sacar una foto de lo que estás viendo" aria-label="Encuadrar y sacar foto"><svg class="i"><use href="#i-camara"/></svg></button>
+  <button type="button" class="modo" data-modo="planeta" aria-pressed="false"><svg class="i"><use href="#i-planeta"/></svg>Mini mundo</button>
+  <button type="button" class="modo" data-modo="cristal" aria-pressed="false"><svg class="i"><use href="#i-bola"/></svg>Bola</button>
+</nav>
+
+<section class="flota hoja vidrio" id="hoja" hidden aria-label="Encuadre">
+  <div class="formatos" role="group" aria-label="Formato">
+    <button type="button" class="chip" data-r="1:1">1:1</button>
+    <button type="button" class="chip" data-r="5:4">5:4</button>
+    <button type="button" class="chip" data-r="4:3">4:3</button>
+    <button type="button" class="chip" data-r="3:2">3:2</button>
+    <button type="button" class="chip" data-r="16:9">16:9</button>
+    <button type="button" class="chip" data-r="2:1">2:1</button>
+    <button type="button" class="chip" data-r="21:9">21:9</button>
+  </div>
+  <div class="acciones">
+    <div class="izq">
+      <button type="button" class="redondo" id="horizontal" title="Horizontal" aria-label="Horizontal"><svg class="i"><use href="#i-horizontal"/></svg></button>
+      <button type="button" class="redondo" id="vertical" title="Vertical" aria-label="Vertical"><svg class="i"><use href="#i-vertical"/></svg></button>
+    </div>
+    <button type="button" class="obturador" id="capturar" title="Sacar foto" aria-label="Sacar foto"><span></span></button>
+    <div class="der"><button type="button" class="redondo" id="cerrarEncuadre" title="Cerrar" aria-label="Cerrar encuadre"><svg class="i"><use href="#i-cerrar"/></svg></button></div>
+  </div>
+</section>
+
+<div class="flota vidrio" id="toast" hidden><span class="ok"></span><span id="toastTxt"></span></div>
 
 <script>
 (function () {
-  const aviso = document.getElementById("aviso");
+  const $ = (id) => document.getElementById(id);
+  const aviso = $("aviso");
   const guardado = (k, v) => { try { return localStorage.getItem(k) || v; } catch (e) { return v; } };
   const guardar = (k, v) => { try { localStorage.setItem(k, v); } catch (e) {} };
   let visor;
   try {
-    visor = new Visor360(document.getElementById("pano"), {
+    visor = new Visor360($("pano"), {
       recto: guardado("visor360-recto", "1") === "1",
       alCambiarModo: (m) => {
         document.querySelectorAll("[data-modo]").forEach((b) => b.setAttribute("aria-pressed", b.dataset.modo === m));
@@ -84,18 +173,16 @@
     .then(() => { aviso.hidden = true; return visor.cargar(grande ? "{{ foto.vista.url }}" : "{{ foto.vista_chica.url }}"); })
     .catch((e) => { aviso.hidden = false; aviso.textContent = e.message; });
 
-  // Recordar la vista elegida al pasar de foto.
-  let modo = "normal";
-  modo = guardado("visor360-modo", "normal");
+  const modo = guardado("visor360-modo", "normal");
   if (modo !== "normal") visor.cambiarModo(modo);
-
   document.querySelectorAll("[data-modo]").forEach((b) => (b.onclick = () => {
     if (visor.giro) desactivarGiro();
     visor.cambiarModo(b.dataset.modo);
   }));
-  document.getElementById("mas").onclick = () => visor.zoom(-0.08);
-  document.getElementById("menos").onclick = () => visor.zoom(0.08);
-  const recto = document.getElementById("recto");
+
+  $("mas").onclick = () => visor.zoom(-0.08);
+  $("menos").onclick = () => visor.zoom(0.08);
+  const recto = $("recto");
   recto.setAttribute("aria-pressed", visor.recto);
   recto.onclick = () => {
     visor.ponerRecto(!visor.recto);
@@ -103,12 +190,12 @@
     guardar("visor360-recto", visor.recto ? "1" : "0");
   };
 
-  const completa = document.getElementById("completa");
+  const completa = $("completa");
   if (!document.fullscreenEnabled) completa.hidden = true;
   completa.onclick = () => document.fullscreenElement ? document.exitFullscreen() : document.documentElement.requestFullscreen();
 
   // Giroscopio: en iPhone requiere permiso explícito con un toque.
-  const giro = document.getElementById("giro");
+  const giro = $("giro");
   if (window.DeviceOrientationEvent && "ontouchstart" in window) giro.hidden = false;
   function desactivarGiro() { visor.desactivarGiro(); giro.setAttribute("aria-pressed", "false"); }
   giro.onclick = async () => {
@@ -116,9 +203,100 @@
     try { if (await visor.activarGiro()) giro.setAttribute("aria-pressed", "true"); } catch (e) {}
   };
 
+  // ----- Encuadre y captura -----
+  const marco = $("marco"), hoja = $("hoja"), dock = $("dock");
+  let formato = guardado("visor360-formato", "16:9");
+  let vertical = guardado("visor360-vertical", innerHeight > innerWidth ? "1" : "0") === "1";
+  let fraccion = { fx: 1, fy: 1 };
+
+  function proporcion() {
+    const [a, b] = formato.split(":").map(Number);
+    return vertical && a !== b ? b / a : a / b;
+  }
+
+  function ubicarMarco() {
+    if (hoja.hidden) return;
+    const vw = innerWidth, vh = innerHeight;
+    const arriba = document.querySelector(".arriba").getBoundingClientRect().bottom + 12;
+    const abajo = vh - hoja.getBoundingClientRect().top + 12;
+    const margenV = Math.max(arriba, abajo);       // centrado: igual arriba y abajo
+    const margenH = vw > 700 ? 76 : 16;            // espacio para el riel en pantallas anchas
+    const maxW = vw - 2 * margenH, maxH = vh - 2 * margenV;
+    const r = proporcion();
+    let w = maxW, h = w / r;
+    if (h > maxH) { h = maxH; w = h * r; }
+    Object.assign(marco.style, { width: w + "px", height: h + "px", left: (vw - w) / 2 + "px", top: (vh - h) / 2 + "px" });
+    fraccion = { fx: w / vw, fy: h / vh };
+    $("formatoTxt").textContent = formato === "1:1" ? "1:1" : vertical ? formato.split(":").reverse().join(":") : formato;
+    document.querySelectorAll("[data-r]").forEach((b) => b.setAttribute("aria-pressed", b.dataset.r === formato));
+    $("horizontal").setAttribute("aria-pressed", !vertical);
+    $("vertical").setAttribute("aria-pressed", vertical);
+  }
+
+  function abrirEncuadre() {
+    if (visor.giro) desactivarGiro();
+    hoja.hidden = false;
+    marco.hidden = false;
+    dock.hidden = true;
+    document.body.classList.add("encuadrando");
+    visor.autoRotar = false;
+    ubicarMarco();
+  }
+  function cerrarEncuadre() {
+    hoja.hidden = true;
+    marco.hidden = true;
+    dock.hidden = false;
+    document.body.classList.remove("encuadrando");
+  }
+  $("abrirEncuadre").onclick = abrirEncuadre;
+  $("cerrarEncuadre").onclick = cerrarEncuadre;
+  document.querySelectorAll("[data-r]").forEach((b) => (b.onclick = () => { formato = b.dataset.r; guardar("visor360-formato", formato); ubicarMarco(); }));
+  $("horizontal").onclick = () => { vertical = false; guardar("visor360-vertical", "0"); ubicarMarco(); };
+  $("vertical").onclick = () => { vertical = true; guardar("visor360-vertical", "1"); ubicarMarco(); };
+  addEventListener("resize", ubicarMarco);
+
+  function avisar(texto) {
+    $("toastTxt").textContent = texto;
+    $("toast").hidden = false;
+    clearTimeout(avisar.t);
+    avisar.t = setTimeout(() => ($("toast").hidden = true), 2600);
+  }
+
+  const nombreBase = "{{ album.titulo|slugify|default:'foto' }}-{{ posicion }}";
+  $("capturar").onclick = async () => {
+    const boton = $("capturar");
+    boton.disabled = true;
+    try {
+      const blob = await visor.capturar({
+        fx: fraccion.fx, fy: fraccion.fy, ladoLargo: 4096,
+        urlAlta: "{{ foto.original.url }}", anchoAlta: {{ foto.ancho|default:0 }},
+      });
+      $("flash").classList.remove("on"); void $("flash").offsetWidth; $("flash").classList.add("on");
+      const nombre = `${nombreBase}-${$("formatoTxt").textContent.replace(":", "x")}.jpg`;
+      const archivo = new File([blob], nombre, { type: "image/jpeg" });
+      // En el teléfono se abre "Compartir" (permite guardar en la galería); en el PC se descarga.
+      if (navigator.canShare && navigator.canShare({ files: [archivo] }) && "ontouchstart" in window) {
+        try { await navigator.share({ files: [archivo] }); avisar("Lista para guardar"); } catch (e) {}
+      } else {
+        const a = document.createElement("a");
+        a.href = URL.createObjectURL(blob);
+        a.download = nombre;
+        document.body.appendChild(a);
+        a.click();
+        setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 4000);
+        avisar("Foto descargada");
+      }
+    } catch (e) {
+      avisar(e.message || "No se pudo sacar la foto");
+    } finally {
+      boton.disabled = false;
+    }
+  };
+
   document.addEventListener("keydown", (e) => {
-    const ir = (id) => { const a = document.getElementById(id); if (a.getAttribute("href")) location.href = a.getAttribute("href"); };
-    if (e.key === "PageDown" || (e.key === "ArrowRight" && e.shiftKey)) ir("sig");
+    const ir = (id) => { const a = $(id); if (a.getAttribute("href")) location.href = a.getAttribute("href"); };
+    if (e.key === "Escape" && !hoja.hidden) cerrarEncuadre();
+    else if (e.key === "PageDown" || (e.key === "ArrowRight" && e.shiftKey)) ir("sig");
     else if (e.key === "PageUp" || (e.key === "ArrowLeft" && e.shiftKey)) ir("ant");
     else if (e.key === "+" || e.key === "=") visor.zoom(-0.08);
     else if (e.key === "-") visor.zoom(0.08);

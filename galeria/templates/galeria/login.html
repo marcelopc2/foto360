@@ -1,14 +1,27 @@
 {% extends "galeria/base.html" %}
 {% block titulo %}Entrar · Fotos 360{% endblock %}
-{% block contenido %}
-<div style="max-width:360px;margin:12vh auto 0">
-  <h1 style="font-size:1.3rem;font-weight:600">Fotos 360</h1>
-  <form method="post">
-    {% csrf_token %}
-    {% if form.errors %}<p style="color:var(--peligro)">Usuario o clave incorrectos.</p>{% endif %}
-    <p><input type="text" name="username" placeholder="Usuario" autofocus autocomplete="username" required></p>
-    <p><input type="password" name="password" placeholder="Clave" autocomplete="current-password" required></p>
-    <button class="primario" type="submit">Entrar</button>
-  </form>
-</div>
+{% block head %}
+<style>
+  .entrar { min-height: 100svh; display: grid; place-items: center; padding: 24px 16px; }
+  .entrar .panel { width: 100%; max-width: 380px; padding: 30px 24px 26px; }
+  .entrar h1 { font-size: 1.6rem; margin: 22px 0 6px; }
+  .entrar form { display: grid; gap: 12px; margin-top: 22px; }
+  .entrar .error { color: var(--peligro); font-size: .9rem; margin: 0; }
+</style>
+{% endblock %}
+{% block cuerpo %}
+<main class="entrar">
+  <div class="panel aparece">
+    <span class="marca"><span class="punto">360</span> Fotos 360</span>
+    <h1>Hola de nuevo</h1>
+    <p class="suave" style="margin:0">Entra para subir y compartir tus fotos.</p>
+    <form method="post">
+      {% csrf_token %}
+      {% if form.errors %}<p class="error">Usuario o clave incorrectos.</p>{% endif %}
+      <input type="text" name="username" placeholder="Usuario" autofocus autocomplete="username" required>
+      <input type="password" name="password" placeholder="Clave" autocomplete="current-password" required>
+      <button class="boton primario" type="submit" style="margin-top:6px">Entrar</button>
+    </form>
+  </div>
+</main>
 {% endblock %}

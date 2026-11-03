@@ -4,21 +4,45 @@
 <meta property="og:title" content="{{ album.titulo }}">
 <meta property="og:description" content="{{ fotos|length }} foto{{ fotos|length|pluralize }} 360">
 {% with p=album.portada %}{% if p %}<meta property="og:image" content="{{ request.scheme }}://{{ request.get_host }}{{ p.miniatura.url }}">{% endif %}{% endwith %}
+<style>
+  .portada { position: relative; display: block; border-radius: 26px; overflow: hidden; margin-bottom: 18px; color: var(--texto); }
+  .portada img { width: 100%; aspect-ratio: 2 / 1; object-fit: cover; max-height: 62vh; }
+  .portada .texto { position: absolute; left: 0; right: 0; bottom: 0; padding: 22px; background: rgba(16, 16, 18, .62); backdrop-filter: blur(8px); }
+  .portada h1 { font-size: clamp(1.5rem, 4.5vw, 2.4rem); }
+  .portada .abrir { position: absolute; top: 16px; right: 16px; }
+  .intro { margin: 0 0 26px; }
+  @media (max-width: 560px) { .portada { border-radius: 20px; } .portada .texto { padding: 16px; } }
+</style>
 {% endblock %}
 {% block contenido %}
-<header class="barra" style="display:block">
-  <h1>{{ album.titulo }}</h1>
-  {% if album.descripcion %}<p style="margin:6px 0 0">{{ album.descripcion|linebreaksbr }}</p>{% endif %}
-  <p class="suave" style="margin:6px 0 0">{{ fotos|length }} foto{{ fotos|length|pluralize }} 360 · toca una para recorrerla</p>
-</header>
+<div class="aparece">
+  {% if fotos %}
+    {% with primera=fotos.0 %}
+    <a class="portada" href="{% url 'visor' album.token primera.uid.hex %}">
+      <img src="{{ primera.vista_chica.url }}" alt="">
+      <span class="boton primario abrir"><svg class="i"><use href="#i-ojo"/></svg>Recorrer</span>
+      <div class="texto">
+        <h1>{{ album.titulo }}</h1>
+        <p class="suave" style="margin:6px 0 0">{{ fotos|length }} foto{{ fotos|length|pluralize }} 360 · toca una para moverte dentro de ella</p>
+      </div>
+    </a>
+    {% endwith %}
+  {% else %}
+    <h1 style="margin-bottom:8px">{{ album.titulo }}</h1>
+  {% endif %}
+  {% if album.descripcion %}<p class="intro">{{ album.descripcion|linebreaksbr }}</p>{% endif %}
+</div>
+
 {% if fotos %}
-<div class="grilla">
+<div class="grilla aparece">
   {% for foto in fotos %}
   <a class="tarjeta" href="{% url 'visor' album.token foto.uid.hex %}">
-    <img src="{{ foto.miniatura.url }}" alt="Foto 360 {{ forloop.counter }}" loading="lazy">
-    {% if foto.titulo or foto.tomada %}
-    <div class="pie"><span class="suave">{{ foto.titulo|default:"" }}{% if foto.tomada %}{{ foto.tomada|date:"j \d\e F Y" }}{% endif %}</span></div>
-    {% endif %}
+    <img class="foto" src="{{ foto.miniatura.url }}" alt="Foto 360 {{ forloop.counter }}" loading="lazy">
+    <span class="insignia">{{ forloop.counter }}</span>
+    <div class="pie">
+      <span class="tenue">{% if foto.titulo %}{{ foto.titulo }}{% elif foto.tomada %}{{ foto.tomada|date:"j \\d\\e F Y" }}{% else %}Foto {{ forloop.counter }}{% endif %}</span>
+      <svg class="i" style="color:var(--ambar)"><use href="#i-adelante"/></svg>
+    </div>
   </a>
   {% endfor %}
 </div>

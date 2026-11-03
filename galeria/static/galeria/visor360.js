@@ -45,6 +45,7 @@
   uniform mat3 M;          // cámara -> mundo
   uniform vec2 kG, kP;     // medio ancho/alto del plano: perspectiva general y Pannini
   uniform float d, dP, mezcla;  // mezcla: 0 = Pannini, 1 = perspectiva general
+  uniform float volteo;          // -1 al capturar: readPixels entrega las filas de abajo hacia arriba
   const float PI = 3.14159265358979;
 
   vec3 general(vec2 s) {
@@ -66,7 +67,8 @@
   }
 
   void main() {
-    vec3 r = mezcla >= 1.0 ? general(ndc * kG) : normalize(mix(pannini(ndc * kP), general(ndc * kG), mezcla));
+    vec2 n = vec2(ndc.x, ndc.y * volteo);
+    vec3 r = mezcla >= 1.0 ? general(n * kG) : normalize(mix(pannini(n * kP), general(n * kG), mezcla));
     vec3 v = M * r;
     float lon = atan(v.x, v.z);
     float lat = asin(clamp(v.y, -1.0, 1.0));
@@ -150,7 +152,7 @@
       gl.enableVertexAttribArray(loc);
       gl.vertexAttribPointer(loc, 2, gl.FLOAT, false, 0, 0);
       this.u = {};
-      for (const n of ["M", "kG", "kP", "d", "dP", "mezcla"]) this.u[n] = gl.getUniformLocation(p, n);
+      for (const n of ["M", "kG", "kP", "d", "dP", "mezcla", "volteo"]) this.u[n] = gl.getUniformLocation(p, n);
       this.tex = gl.createTexture();
     }
 
@@ -162,8 +164,13 @@
       const r = await fetch(url);
       if (!r.ok) throw new Error("No se pudo cargar la foto.");
       const bmp = await createImageBitmap(await r.blob());
+      this._subirTextura(this.tex, bmp);
+      this.cargada = true;
+    }
+
+    _subirTextura(tex, bmp) {
       const gl = this.gl;
-      gl.bindTexture(gl.TEXTURE_2D, this.tex);
+      gl.bindTexture(gl.TEXTURE_2D, tex);
       gl.pixelStorei(gl.UNPACK_COLORSPACE_CONVERSION_WEBGL, gl.NONE);
       gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, bmp);
       gl.generateMipmap(gl.TEXTURE_2D);
@@ -174,7 +181,7 @@
       const aniso = gl.getExtension("EXT_texture_filter_anisotropic");
       if (aniso) gl.texParameterf(gl.TEXTURE_2D, aniso.TEXTURE_MAX_ANISOTROPY_EXT, Math.min(8, gl.getParameter(aniso.MAX_TEXTURE_MAX_ANISOTROPY_EXT)));
       bmp.close();
-      this.cargada = true;
+      gl.bindTexture(gl.TEXTURE_2D, this.tex);
     }
 
     // ----- Zoom continuo y modos -----
@@ -331,6 +338,15 @@
       }
       if (!this.cargada) return;
 
+      const gl = this.gl;
+      gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+      gl.viewport(0, 0, this.canvas.width, this.canvas.height);
+      this._dibujar(this.canvas.width, this.canvas.height, 1, 1, 1);
+    }
+
+    // Dibuja la vista actual. W x H: tamaño de la pantalla (define la proporción);
+    // fx, fy: fracción de la pantalla que se dibuja (el encuadre, centrado).
+    _dibujar(W, H, fx, fy, volteo) {
       const { fov, d } = enCurva(this.z);
       // Al alejarse, la vista gira sola hacia el suelo (mini mundo) o el cielo (bola).
       const s = (this.s = suave(0.42, 0.72, this.z));
@@ -339,28 +355,75 @@
       const dP = suave(0.15, 0.5, this.z);
 
       const gl = this.gl;
-      const W = this.canvas.width, H = this.canvas.height;
-      gl.viewport(0, 0, W, H);
       const ancho = W >= H;
       // Perspectiva general: el fov se reparte sobre el lado corto, sin pasar el límite de la proyección.
       const lim = 2 * Math.acos(-d) / RAD - 2;
       const m = (Math.min(fov, lim) / 2) * RAD;
       const kc = ((1 + d) * Math.sin(m)) / (d + Math.cos(m));
-      gl.uniform2f(this.u.kG, ancho ? kc * W / H : kc, ancho ? kc : kc * H / W);
+      gl.uniform2f(this.u.kG, (ancho ? kc * W / H : kc) * fx, (ancho ? kc : kc * H / W) * fy);
       // Pannini: mismo fov sobre el lado corto (vertical: tangente; horizontal: fórmula de Pannini).
       const mp = (Math.min(fov, 150) / 2) * RAD;
       if (ancho) {
         const ky = Math.tan(mp);
-        gl.uniform2f(this.u.kP, ky * W / H, ky);
+        gl.uniform2f(this.u.kP, ky * W / H * fx, ky * fy);
       } else {
         const kx = ((dP + 1) * Math.sin(mp)) / (dP + Math.cos(mp));
-        gl.uniform2f(this.u.kP, kx, kx * H / W);
+        gl.uniform2f(this.u.kP, kx * fx, kx * H / W * fy);
       }
       gl.uniform1f(this.u.d, d);
       gl.uniform1f(this.u.dP, dP);
       gl.uniform1f(this.u.mezcla, mezcla);
+      gl.uniform1f(this.u.volteo, volteo);
       gl.uniformMatrix3fv(this.u.M, true, new Float32Array(this._matriz(pitch).flat()));
       gl.drawArrays(gl.TRIANGLES, 0, 3);
+    }
+
+    // ----- Captura -----
+    // Foto plana de lo que está dentro del encuadre (fracción fx, fy de la pantalla, centrado).
+    // `urlAlta`: la foto original, para que la captura salga con todo el detalle si la GPU la aguanta.
+    async capturar({ fx, fy, ladoLargo = 4096, urlAlta = null, anchoAlta = 0 }) {
+      const gl = this.gl;
+      const maxRB = Math.min(gl.getParameter(gl.MAX_RENDERBUFFER_SIZE), gl.getParameter(gl.MAX_VIEWPORT_DIMS)[0]);
+      const cw = this.canvas.clientWidth, ch = this.canvas.clientHeight;
+      const proporcion = (fx * cw) / (fy * ch);
+      const largo = Math.min(ladoLargo, maxRB);
+      const W = Math.round(proporcion >= 1 ? largo : largo * proporcion);
+      const H = Math.round(proporcion >= 1 ? largo / proporcion : largo);
+
+      if (urlAlta && !this.texAlta && anchoAlta && anchoAlta <= this.maxTextura()) {
+        try {
+          const bmp = await createImageBitmap(await (await fetch(urlAlta)).blob());
+          this.texAlta = gl.createTexture();
+          this._subirTextura(this.texAlta, bmp);
+        } catch (e) {
+          this.texAlta = null; // se captura con la vista normal
+        }
+      }
+
+      const rb = gl.createRenderbuffer();
+      gl.bindRenderbuffer(gl.RENDERBUFFER, rb);
+      gl.renderbufferStorage(gl.RENDERBUFFER, gl.RGBA8, W, H);
+      const fb = gl.createFramebuffer();
+      gl.bindFramebuffer(gl.FRAMEBUFFER, fb);
+      gl.framebufferRenderbuffer(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.RENDERBUFFER, rb);
+      gl.viewport(0, 0, W, H);
+      if (this.texAlta) gl.bindTexture(gl.TEXTURE_2D, this.texAlta);
+      this._dibujar(cw, ch, fx, fy, -1);
+      const px = new Uint8ClampedArray(W * H * 4);
+      gl.readPixels(0, 0, W, H, gl.RGBA, gl.UNSIGNED_BYTE, px);
+      gl.bindTexture(gl.TEXTURE_2D, this.tex);
+      gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+      gl.deleteFramebuffer(fb);
+      gl.deleteRenderbuffer(rb);
+
+      const lienzo = document.createElement("canvas");
+      lienzo.width = W;
+      lienzo.height = H;
+      lienzo.getContext("2d").putImageData(new ImageData(px, W, H), 0, 0);
+      const blob = await new Promise((ok) => lienzo.toBlob(ok, "image/jpeg", 0.92));
+      lienzo.width = lienzo.height = 0;
+      if (!blob) throw new Error("No se pudo generar la foto.");
+      return blob;
     }
   }
 

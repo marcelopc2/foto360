@@ -1,59 +1,76 @@
 {% extends "galeria/base.html" %}
+{% load static %}
 {% block titulo %}{{ album.titulo }} · Fotos 360{% endblock %}
 {% block head %}
+<script src="{% static 'galeria/unir360.js' %}"></script>
 <style>
-  .compartir { background: var(--superficie); border: 1px solid var(--borde); border-radius: var(--radio);
-    padding: 14px; display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
-  .compartir input { flex: 1 1 260px; font-family: ui-monospace, monospace; font-size: .85rem; }
-  .zona { margin-top: 12px; border: 2px dashed var(--borde); border-radius: var(--radio); padding: 28px 16px;
-    text-align: center; cursor: pointer; }
-  .zona.encima { border-color: var(--acento); }
-  .cola { list-style: none; padding: 0; margin: 12px 0 0; font-size: .9rem; }
-  .cola li { display: flex; justify-content: space-between; gap: 12px; padding: 6px 0;
-    border-bottom: 1px solid var(--borde); }
+  .volver { display: inline-flex; align-items: center; gap: 4px; color: var(--suave); font-size: .92rem; }
+  .titulo-album { display: flex; align-items: flex-end; justify-content: space-between; gap: 16px; flex-wrap: wrap; margin-bottom: 22px; }
+  .compartir { display: grid; grid-template-columns: 1fr auto auto; gap: 10px; align-items: center; }
+  .compartir .link { display: flex; align-items: center; gap: 10px; min-height: 48px; padding: 0 16px; border-radius: 999px;
+    background: var(--fondo); color: var(--suave); font-size: .85rem; overflow: hidden; }
+  .compartir .link span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .zona { display: grid; place-items: center; gap: 6px; margin-top: 14px; padding: 34px 18px; text-align: center; cursor: pointer;
+    border: 1.5px dashed #4a4a50; border-radius: var(--radio); background: var(--superficie); transition: border-color .15s, background .15s; }
+  .zona:hover, .zona.encima { border-color: var(--ambar); background: #26241f; }
+  .zona .circulo { width: 52px; height: 52px; border-radius: 50%; display: grid; place-items: center; background: var(--ambar); color: var(--sobre-ambar); }
+  .zona .circulo svg { width: 24px; height: 24px; }
+  .cola { list-style: none; padding: 0; margin: 12px 0 0; display: grid; gap: 6px; }
+  .cola li { display: flex; justify-content: space-between; gap: 12px; padding: 10px 14px; border-radius: var(--radio-chico);
+    background: var(--superficie); font-size: .88rem; }
+  .cola li span:first-child { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .cola .error { color: var(--peligro); }
-  .cola .ok { color: var(--acento); }
-  .tarjeta .pie { display: flex; justify-content: space-between; align-items: center; gap: 8px; }
-  .tarjeta .pie span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  .tarjeta .pie button { padding: 4px 10px; font-size: .85rem; }
-  details { margin-top: 32px; }
-  details summary { cursor: pointer; color: var(--suave); }
-  details form { margin-top: 12px; }
+  .cola .ok { color: var(--ok); }
+  .tarjeta .pie .tenue { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .tarjeta .pie .boton { min-height: 36px; width: 36px; }
+  details.panel { margin-top: 34px; }
+  details summary { cursor: pointer; display: flex; align-items: center; gap: 8px; color: var(--suave); list-style: none; }
+  details summary::-webkit-details-marker { display: none; }
+  details .opciones { display: grid; gap: 14px; margin-top: 16px; }
+  details .fila { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; }
+  @media (max-width: 620px) {
+    .compartir { grid-template-columns: 1fr 1fr; }
+    .compartir .link { grid-column: 1 / -1; }
+  }
 </style>
 {% endblock %}
 {% block contenido %}
-{% load static %}
-<script src="{% static 'galeria/unir360.js' %}"></script>
-<header class="barra">
-  <h1><a class="marca" href="{% url 'inicio' %}">Álbumes</a> / {{ album.titulo }}</h1>
-  <a class="boton" href="{% url 'album_publico' album.token %}" target="_blank">Ver como familia</a>
-</header>
-
-<div class="compartir">
-  <input type="text" id="enlace" value="{{ enlace }}" readonly>
-  <button type="button" id="copiar">Copiar link</button>
-  <a class="boton primario" href="https://wa.me/?text={{ album.titulo|urlencode }}%20{{ enlace|urlencode }}" target="_blank">Enviar por WhatsApp</a>
+<a class="volver" href="{% url 'inicio' %}"><svg class="i"><use href="#i-atras"/></svg>Tus álbumes</a>
+<div class="titulo-album" style="margin-top:10px">
+  <div>
+    <h1>{{ album.titulo }}</h1>
+    <p class="suave" style="margin:6px 0 0">{{ album.fotos.count }} foto{{ album.fotos.count|pluralize }} · creado el {{ album.creado|date:"j \d\e F Y" }}</p>
+  </div>
+  <a class="boton" href="{% url 'album_publico' album.token %}" target="_blank"><svg class="i"><use href="#i-ojo"/></svg>Ver como familia</a>
 </div>
-<p class="suave">Quien tenga este link puede ver y descargar las fotos del álbum. No necesita cuenta.</p>
 
-<h2>Subir fotos</h2>
+<section class="panel">
+  <div class="compartir">
+    <div class="link"><svg class="i"><use href="#i-enlace"/></svg><span id="enlace">{{ enlace }}</span></div>
+    <button type="button" class="boton" id="copiar">Copiar link</button>
+    <a class="boton primario" href="https://wa.me/?text={{ album.titulo|urlencode }}%20{{ enlace|urlencode }}" target="_blank"><svg class="i"><use href="#i-mensaje"/></svg>WhatsApp</a>
+  </div>
+  <p class="tenue" style="margin:12px 4px 0">Quien tenga este link puede ver y descargar las fotos del álbum, sin crear cuenta.</p>
+</section>
+
 <label class="zona" id="zona">
   <input type="file" id="archivos" accept=".insp,.jpg,.jpeg,image/jpeg" multiple hidden>
-  <strong>Arrastra aquí tus fotos 360</strong><br>
-  <span class="suave">o toca para elegirlas · los .insp tal como salen de la cámara (o .jpg 360)</span>
+  <span class="circulo"><svg class="i"><use href="#i-subir"/></svg></span>
+  <strong style="font-weight:500">Arrastra aquí tus fotos 360</strong>
+  <span class="tenue">o toca para elegirlas · .insp tal como salen de la cámara, o .jpg 360</span>
 </label>
 <ul class="cola" id="cola"></ul>
 
-<h2>Fotos ({{ album.fotos.count }})</h2>
+<h2>Fotos del álbum</h2>
 {% if album.fotos.exists %}
-<div class="grilla">
+<div class="grilla aparece">
   {% for foto in album.fotos.all %}
   <div class="tarjeta">
-    <a href="{% url 'visor' album.token foto.uid.hex %}" target="_blank"><img src="{{ foto.miniatura.url }}" alt="" loading="lazy"></a>
+    <a href="{% url 'visor' album.token foto.uid.hex %}" target="_blank"><img class="foto" src="{{ foto.miniatura.url }}" alt="" loading="lazy"></a>
     <div class="pie">
-      <span class="suave">{% if foto.tomada %}{{ foto.tomada|date:"j M Y H:i" }}{% else %}{{ foto.nombre_original }}{% endif %}</span>
+      <span class="tenue">{% if foto.tomada %}{{ foto.tomada|date:"j M Y · H:i" }}{% else %}{{ foto.nombre_original }}{% endif %}</span>
       <form method="post" action="{% url 'borrar_foto' foto.pk %}" onsubmit="return confirm('¿Borrar esta foto?')">
-        {% csrf_token %}<button class="peligro" type="submit">Borrar</button>
+        {% csrf_token %}<button class="boton icono peligro" type="submit" title="Borrar foto" aria-label="Borrar foto"><svg class="i"><use href="#i-basura"/></svg></button>
       </form>
     </div>
   </div>
@@ -63,21 +80,23 @@
 <p class="suave">Todavía no hay fotos en este álbum.</p>
 {% endif %}
 
-<details>
-  <summary>Opciones del álbum</summary>
-  <form method="post">
-    {% csrf_token %}
-    <p><input type="text" name="titulo" value="{{ album.titulo }}" required></p>
-    <p><textarea name="descripcion" rows="2" placeholder="Descripción (opcional, la ve tu familia)">{{ album.descripcion }}</textarea></p>
-    <button type="submit">Guardar</button>
-  </form>
-  <form method="post" action="{% url 'nuevo_enlace' album.pk %}" onsubmit="return confirm('El link actual dejará de funcionar. ¿Seguir?')">
-    {% csrf_token %}<button type="submit">Generar link nuevo</button>
-    <span class="suave">Úsalo si el link llegó a quien no debía.</span>
-  </form>
-  <form method="post" action="{% url 'borrar_album' album.pk %}" onsubmit="return confirm('Se borrará el álbum y todas sus fotos. ¿Seguro?')">
-    {% csrf_token %}<button class="peligro" type="submit">Borrar álbum completo</button>
-  </form>
+<details class="panel">
+  <summary><svg class="i"><use href="#i-ajustes"/></svg>Opciones del álbum</summary>
+  <div class="opciones">
+    <form method="post" class="opciones" style="margin:0">
+      {% csrf_token %}
+      <input type="text" name="titulo" value="{{ album.titulo }}" required>
+      <textarea name="descripcion" rows="2" placeholder="Descripción (opcional, la ve tu familia)">{{ album.descripcion }}</textarea>
+      <div><button class="boton primario" type="submit">Guardar cambios</button></div>
+    </form>
+    <form method="post" action="{% url 'nuevo_enlace' album.pk %}" class="fila" onsubmit="return confirm('El link actual dejará de funcionar. ¿Seguir?')">
+      {% csrf_token %}<button class="boton" type="submit">Generar link nuevo</button>
+      <span class="tenue">Úsalo si el link llegó a quien no debía.</span>
+    </form>
+    <form method="post" action="{% url 'borrar_album' album.pk %}" onsubmit="return confirm('Se borrará el álbum y todas sus fotos. ¿Seguro?')">
+      {% csrf_token %}<button class="boton peligro" type="submit"><svg class="i"><use href="#i-basura"/></svg>Borrar álbum completo</button>
+    </form>
+  </div>
 </details>
 
 <script>
@@ -90,8 +109,8 @@
   let pendientes = [], subiendo = false, huboExito = false;
 
   document.getElementById("copiar").onclick = async function () {
-    const campo = document.getElementById("enlace");
-    try { await navigator.clipboard.writeText(campo.value); } catch (e) { campo.select(); document.execCommand("copy"); }
+    const texto = document.getElementById("enlace").textContent.trim();
+    try { await navigator.clipboard.writeText(texto); } catch (e) { prompt("Copia el link:", texto); }
     this.textContent = "Copiado";
     setTimeout(() => (this.textContent = "Copiar link"), 1500);
   };
