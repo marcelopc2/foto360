@@ -181,8 +181,10 @@
     cambiarModo(nombre) {
       if (!(nombre in MODOS)) return;
       if (this.giro && nombre !== "normal") return;
-      if (nombre === "planeta") this.pitchLejosDestino = -90;
-      if (nombre === "cristal") this.pitchLejosDestino = 90;
+      // Ir al equivalente más cercano (cada 360°) para no dar vueltas de más.
+      const cercano = (a) => a + 360 * Math.round((this.pitchLejos - a) / 360);
+      if (nombre === "planeta") this.pitchLejosDestino = cercano(-90);
+      if (nombre === "cristal") this.pitchLejosDestino = cercano(90);
       this.zDestino = MODOS[nombre];
       this._tocar();
     }
@@ -273,8 +275,9 @@
           const grados = (d > 0.5 ? fov / 3 : fov) / Math.min(c.clientWidth, c.clientHeight);
           this.yaw -= dx * grados * RAD;
           if (this.s > 0.5) {
-            // Alejado: el arrastre vertical inclina entre mini mundo y bola (media pantalla ≈ 90°).
-            const p = Math.max(-90, Math.min(90, this.pitchLejosDestino + dy * 180 / Math.min(c.clientWidth, c.clientHeight)));
+            // Alejado: el arrastre vertical inclina sin tope (media pantalla ≈ 90°): del mini mundo
+            // pasa por el horizonte a la bola y, si se sigue, el planeta rueda y muestra el otro lado.
+            const p = this.pitchLejosDestino + dy * 180 / Math.min(c.clientWidth, c.clientHeight);
             this.pitchLejos = this.pitchLejosDestino = p;
           } else {
             this.pitchUsuario = Math.max(-90, Math.min(90, this.pitchUsuario + dy * grados));
@@ -315,7 +318,13 @@
       if (this.autoRotar && !this.giro && t - this.ultimaInteraccion > 4000) this.yaw += 0.00025 * dt;
 
       this.pitchLejos += (this.pitchLejosDestino - this.pitchLejos) * (1 - Math.exp(-dt / 90));
-      const modo = this.zDestino < 0.42 ? "normal" : this.zDestino < 0.7 ? "angular" : this.pitchLejosDestino > 0 ? "cristal" : "planeta";
+      // Mantener la inclinación a menos de media vuelta de la del modo normal (360° es la misma vista),
+      // así al acercarse vuelve por el camino corto.
+      const vuelta = 360 * Math.round((this.pitchLejos - this.pitchUsuario) / 360);
+      this.pitchLejos -= vuelta;
+      this.pitchLejosDestino -= vuelta;
+      const arriba = Math.sin(this.pitchLejosDestino * RAD) > 0;
+      const modo = this.zDestino < 0.42 ? "normal" : this.zDestino < 0.7 ? "angular" : arriba ? "cristal" : "planeta";
       if (modo !== this.modoActual) {
         this.modoActual = modo;
         this.alCambiarModo(modo);
