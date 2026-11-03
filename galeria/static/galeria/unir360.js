@@ -6,12 +6,13 @@
 
   const MAGIA = "8db42d694ccc418790edff439fe026bf";
   const MUESTRAS_NIVEL = 200;
-  const FEATHER = (3 * Math.PI) / 180;
+  const FEATHER = (2 * Math.PI) / 180; // media franja de mezcla alrededor de la línea de corte
   // Paralaje: los lentes están ~3 cm separados. Se prueban distancias (como 1/d, de infinito a 50 cm)
   // y en cada ángulo de la costura se usa la que mejor calza. Igual que en unir.py.
   const INV_D = Array.from({ length: 21 }, (_, i) => i * 0.1);
   const N_PHI = 720;
-  const N_TH = 24;
+  const N_TH = 24; // filas de la franja de solape, de 84° a 96°
+  const FILA_MIN = 4, FILA_MAX = N_TH - 5; // dónde puede ir la línea de corte (86°–94°)
 
   function leerCalibracion(texto) {
     const m = texto.match(/2_2\.000000_[-0-9._]+/);
@@ -93,7 +94,7 @@
   uniform mat3 N;            // nivelación: mundo -> cámara
   uniform mat3 R[2];         // cámara -> cada lente
   uniform vec3 T[2], G[2];   // posición de cada lente (m) y ganancia de color
-  uniform sampler2D tInv;    // 1/distancia por ángulo de la costura (N_PHI x 1)
+  uniform sampler2D tInv;    // por ángulo de la costura (N_PHI x 1): r = 1/distancia, g = θ de la línea de corte
   uniform int modo;          // 0: foto final; 1: franja de la costura en gris; 2: franja en color
   uniform float invFijo;
   uniform float xi[2], fx[2], fy[2], cx[2], cy[2], k1[2], k2[2], k3[2], p1[2], p2[2];
@@ -114,18 +115,15 @@
     float dx = mx * rad + 2.0 * p1[i] * mx * my + p2[i] * (r2 + 2.0 * mx * mx);
     float dy = my * rad + p1[i] * (r2 + 2.0 * my * my) + 2.0 * p2[i] * mx * my;
     vec2 uv = vec2((fx[i] * dx + cx[i]) / calW, (fy[i] * dy + cy[i]) / calH);
-    float theta = acos(clamp(d.z, -1.0, 1.0));
-    float w = clamp((PI / 2.0 + FEATHER - theta) / (2.0 * FEATHER), 0.0, 1.0);
-    if (modo != 0) return vec4(texture(img, uv).rgb, 1.0);
-    return vec4(texture(img, uv).rgb * w, w);
+    return vec4(texture(img, uv).rgb, 1.0);
   }
 
-  float invEn(vec3 db) {
+  vec2 costuraEn(vec3 db) {
     float pos = mod((atan(db.y, db.x) + PI) / (2.0 * PI) * N_PHI - 0.5, N_PHI);
     int i0 = int(floor(pos));
-    float a = texelFetch(tInv, ivec2(i0, 0), 0).r;
-    float b = texelFetch(tInv, ivec2((i0 + 1) % int(N_PHI), 0), 0).r;
-    return mix(a, b, fract(pos)) * (1.0 - db.z * db.z);  // se desvanece hacia el centro de cada lente
+    vec2 a = texelFetch(tInv, ivec2(i0, 0), 0).rg;
+    vec2 b = texelFetch(tInv, ivec2((i0 + 1) % int(N_PHI), 0), 0).rg;
+    return mix(a, b, fract(pos));
   }
 
   void main() {
@@ -145,11 +143,13 @@
     float lon = px.x / salida.x * 2.0 * PI - PI;
     float lat = PI / 2.0 - px.y / salida.y * PI;
     vec3 db = N * vec3(cos(lat) * sin(lon), -sin(lat), cos(lat) * cos(lon));
-    float iv = invEn(db);
-    vec4 a = lente(0, db, iv);
-    vec4 b = lente(1, db, iv);
-    vec3 suma = a.rgb * G[0] + b.rgb * G[1];
-    color = vec4(suma / max(a.a + b.a, 1e-6), 1.0);
+    vec2 c = costuraEn(db);
+    float iv = c.r * (1.0 - db.z * db.z);  // se desvanece hacia el centro de cada lente
+    // Peso del lente frontal: 1 antes de la línea de corte, 0 después, con mezcla corta.
+    float w1 = clamp((c.g + FEATHER - acos(clamp(db.z, -1.0, 1.0))) / (2.0 * FEATHER), 0.0, 1.0);
+    vec3 a = lente(0, db, iv).rgb;
+    vec3 b = lente(1, db, iv).rgb;
+    color = vec4(a * G[0] * w1 + b * G[1] * (1.0 - w1), 1.0);
   }`;
 
   // Dibuja la franja de la costura (N_PHI x 2·N_TH) con una distancia fija y la devuelve en RGBA.
@@ -173,54 +173,79 @@
     return px;
   }
 
-  function buscarDistancias(gl, u) {
+  const suavizarCircular = (f, r) => Float64Array.from(f, (_, j) => {
+    let t = 0;
+    for (let d = -r; d <= r; d++) t += f[(j + d + f.length) % f.length];
+    return t / (2 * r + 1);
+  });
+
+  function gaussCircular(f, sigma) {
+    const r = Math.ceil(3 * sigma);
+    const g = Array.from({ length: 2 * r + 1 }, (_, i) => Math.exp(-0.5 * ((i - r) / sigma) ** 2));
+    const sg = g.reduce((a, b) => a + b);
+    return Float32Array.from(f, (_, j) => g.reduce((acc, w, i) => acc + w * f[(j + i - r + f.length) % f.length], 0) / sg);
+  }
+
+  // Por cada ángulo de la costura: la distancia que mejor calza ambos lentes y dónde poner la línea de corte.
+  function buscarCostura(gl, u) {
     const n = N_PHI * N_TH;
-    const costos = INV_D.map((iv) => {
+    const difs = INV_D.map((iv) => {
       const px = leerBanda(gl, u, 1, iv);
       let ma = 0, mb = 0;
       for (let k = 0; k < n; k++) { ma += px[k * 4]; mb += px[(n + k) * 4]; }
       ma /= n;
       mb /= n;
-      const c = new Float64Array(N_PHI);
-      for (let f = 0; f < N_TH; f++) {
-        for (let j = 0; j < N_PHI; j++) {
-          const a = px[(f * N_PHI + j) * 4], b = px[((N_TH + f) * N_PHI + j) * 4];
-          c[j] += Math.abs(a - ma - (b - mb)) / N_TH;
-        }
-      }
-      return c;
+      const d = new Float32Array(n); // fila θ, columna φ
+      for (let k = 0; k < n; k++) d[k] = Math.abs(px[k * 4] - ma - (px[(n + k) * 4] - mb));
+      return d;
     });
-    const idx = elegirDistancias(costos);
-    const inv = Float64Array.from(idx, (k) => INV_D[k]);
-    const g = Array.from({ length: 13 }, (_, i) => Math.exp(-0.5 * ((i - 6) / 3) ** 2));
-    const sg = g.reduce((a, b) => a + b);
-    return Float32Array.from({ length: N_PHI }, (_, j) =>
-      g.reduce((acc, w, i) => acc + w * inv[(j + i - 6 + N_PHI) % N_PHI], 0) / sg);
+
+    // 1) Distancia: error promedio en toda la franja, por ángulo.
+    const costoD = difs.map((d) => {
+      const c = new Float64Array(N_PHI);
+      for (let f = 0; f < N_TH; f++) for (let j = 0; j < N_PHI; j++) c[j] += d[f * N_PHI + j] / N_TH;
+      return suavizarCircular(c, 4);
+    });
+    const k = camino(costoD, 0.15);
+    const inv = gaussCircular(Float64Array.from(k, (q) => INV_D[q]), 3);
+
+    // 2) Línea de corte: dentro del solape, por donde ambos lentes más coinciden a esa distancia.
+    const filas = FILA_MAX - FILA_MIN + 1;
+    const costoF = Array.from({ length: filas }, (_, r) => {
+      const c = new Float64Array(N_PHI);
+      for (let j = 0; j < N_PHI; j++) {
+        let t = 0;
+        for (let df = -3; df <= 3; df++) {
+          const f = Math.min(N_TH - 1, Math.max(0, FILA_MIN + r + df));
+          t += difs[k[j]][f * N_PHI + j];
+        }
+        c[j] = t / 7;
+      }
+      return suavizarCircular(c, 4);
+    });
+    const fila = camino(costoF, 0.3);
+    const corte = gaussCircular(Float64Array.from(fila, (r) => (84 + (12 * (FILA_MIN + r)) / (N_TH - 1)) * Math.PI / 180), 2);
+    return { inv, corte };
   }
 
-  // Programación dinámica: distancia por ángulo que minimiza el error sin saltos bruscos.
-  function elegirDistancias(costos) {
+  // Programación dinámica sobre el círculo de la costura: un índice por ángulo, sin saltos bruscos.
+  function camino(costos, lamRel) {
     const K = costos.length, n = N_PHI;
-    const c = costos.map((f) => Float64Array.from({ length: n }, (_, j) => {
-      let s = 0;
-      for (let d = -4; d <= 4; d++) s += f[(j + d + n) % n];
-      return s / 9;
-    }));
-    const todos = c.flatMap((f) => Array.from(f)).sort((a, b) => a - b);
-    const lam = 0.15 * todos[Math.floor(todos.length / 2)] + 1e-6;
-    const largo = 3 * n; // la costura es un círculo: se resuelve 3 vueltas y se usa la del medio
-    let acum = Float64Array.from({ length: K }, (_, k) => c[k][0]);
+    const todos = costos.flatMap((f) => Array.from(f)).sort((a, b) => a - b);
+    const lam = lamRel * todos[Math.floor(todos.length / 2)] + 1e-6;
+    const largo = 3 * n; // 3 vueltas y se usa la del medio
+    let acum = Float64Array.from({ length: K }, (_, q) => costos[q][0]);
     const desde = new Int32Array(largo * K);
     for (let j = 1; j < largo; j++) {
       const nuevo = new Float64Array(K);
-      for (let k = 0; k < K; k++) {
+      for (let q = 0; q < K; q++) {
         let mejor = Infinity, arg = 0;
-        for (let q = 0; q < K; q++) {
-          const v = acum[q] + lam * Math.abs(k - q);
-          if (v < mejor) { mejor = v; arg = q; }
+        for (let p = 0; p < K; p++) {
+          const v = acum[p] + lam * Math.abs(q - p);
+          if (v < mejor) { mejor = v; arg = p; }
         }
-        desde[j * K + k] = arg;
-        nuevo[k] = mejor + c[k][j % n];
+        desde[j * K + q] = arg;
+        nuevo[q] = mejor + costos[q][j % n];
       }
       acum = nuevo;
     }
@@ -326,13 +351,18 @@
     // Distancia de la costura por ángulo y ganancia de color entre lentes.
     gl.uniform1i(u("img"), 0);
     gl.uniform1i(u("tInv"), 1);
-    const inv = opciones.paralaje === false ? new Float32Array(N_PHI) : buscarDistancias(gl, u);
+    const costura = opciones.paralaje === false
+      ? { inv: new Float32Array(N_PHI), corte: new Float32Array(N_PHI).fill(Math.PI / 2) }
+      : buscarCostura(gl, u);
+    const inv = costura.inv;
     const ganancia = medirGanancias(gl, u, mediana(inv));
+    const rg = new Float32Array(2 * N_PHI);
+    for (let j = 0; j < N_PHI; j++) { rg[2 * j] = inv[j]; rg[2 * j + 1] = costura.corte[j]; }
     gl.uniform3fv(u("G"), new Float32Array([...ganancia, ...ganancia.map((x) => 1 / x)]));
     const texInv = gl.createTexture();
     gl.activeTexture(gl.TEXTURE1);
     gl.bindTexture(gl.TEXTURE_2D, texInv);
-    gl.texImage2D(gl.TEXTURE_2D, 0, gl.R32F, N_PHI, 1, 0, gl.RED, gl.FLOAT, inv);
+    gl.texImage2D(gl.TEXTURE_2D, 0, gl.RG32F, N_PHI, 1, 0, gl.RG, gl.FLOAT, rg);
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
     gl.activeTexture(gl.TEXTURE0);

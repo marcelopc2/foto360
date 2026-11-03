@@ -43,6 +43,7 @@
 <div class="capa lado">
   <button type="button" id="mas" title="Acercar">+</button>
   <button type="button" id="menos" title="Alejar">−</button>
+  <button type="button" id="recto" title="Enderezar las líneas en las vistas anchas (dewarp)" aria-pressed="true">Recto</button>
   <button type="button" id="completa" title="Pantalla completa">⛶</button>
   <button type="button" id="giro" title="Mirar moviendo el teléfono" aria-pressed="false" hidden>Mover</button>
 </div>
@@ -61,12 +62,15 @@
 <script>
 (function () {
   const aviso = document.getElementById("aviso");
+  const guardado = (k, v) => { try { return localStorage.getItem(k) || v; } catch (e) { return v; } };
+  const guardar = (k, v) => { try { localStorage.setItem(k, v); } catch (e) {} };
   let visor;
   try {
     visor = new Visor360(document.getElementById("pano"), {
+      recto: guardado("visor360-recto", "1") === "1",
       alCambiarModo: (m) => {
         document.querySelectorAll("[data-modo]").forEach((b) => b.setAttribute("aria-pressed", b.dataset.modo === m));
-        try { localStorage.setItem("visor360-modo", m); } catch (e) {}
+        guardar("visor360-modo", m);
       },
     });
   } catch (e) {
@@ -82,15 +86,22 @@
 
   // Recordar la vista elegida al pasar de foto.
   let modo = "normal";
-  try { modo = localStorage.getItem("visor360-modo") || "normal"; } catch (e) {}
+  modo = guardado("visor360-modo", "normal");
   if (modo !== "normal") visor.cambiarModo(modo);
 
   document.querySelectorAll("[data-modo]").forEach((b) => (b.onclick = () => {
     if (visor.giro) desactivarGiro();
     visor.cambiarModo(b.dataset.modo);
   }));
-  document.getElementById("mas").onclick = () => visor.zoom(0.8);
-  document.getElementById("menos").onclick = () => visor.zoom(1.25);
+  document.getElementById("mas").onclick = () => visor.zoom(-0.08);
+  document.getElementById("menos").onclick = () => visor.zoom(0.08);
+  const recto = document.getElementById("recto");
+  recto.setAttribute("aria-pressed", visor.recto);
+  recto.onclick = () => {
+    visor.ponerRecto(!visor.recto);
+    recto.setAttribute("aria-pressed", visor.recto);
+    guardar("visor360-recto", visor.recto ? "1" : "0");
+  };
 
   const completa = document.getElementById("completa");
   if (!document.fullscreenEnabled) completa.hidden = true;
@@ -109,8 +120,8 @@
     const ir = (id) => { const a = document.getElementById(id); if (a.getAttribute("href")) location.href = a.getAttribute("href"); };
     if (e.key === "PageDown" || (e.key === "ArrowRight" && e.shiftKey)) ir("sig");
     else if (e.key === "PageUp" || (e.key === "ArrowLeft" && e.shiftKey)) ir("ant");
-    else if (e.key === "+" || e.key === "=") visor.zoom(0.8);
-    else if (e.key === "-") visor.zoom(1.25);
+    else if (e.key === "+" || e.key === "=") visor.zoom(-0.08);
+    else if (e.key === "-") visor.zoom(0.08);
     else if (["1", "2", "3", "4"].includes(e.key)) visor.cambiarModo(["normal", "angular", "planeta", "cristal"][+e.key - 1]);
   });
 

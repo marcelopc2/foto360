@@ -1,18 +1,38 @@
-// Visor de fotos 360 (equirectangulares) con WebGL2: vista normal, gran angular, mini mundo y bola de cristal.
-// Todas las vistas son la misma proyección "perspectiva general": el centro de proyección se ubica a una
-// distancia d detrás del centro de la esfera (d = 0 rectilínea, d = 1 estereográfica = mini mundo).
+// Visor de fotos 360 (equirectangulares) con WebGL2.
+// Un solo zoom continuo z (0 = muy cerca, 1 = mini mundo) recorre normal -> gran angular -> mini mundo,
+// como en la app de Insta360. Las vistas son la proyección "perspectiva general": el centro de proyección
+// está a una distancia d detrás del centro de la esfera (d = 0 rectilínea, d = 1 estereográfica).
+// Con "Recto" las vistas anchas usan Pannini, que mantiene rectas las líneas verticales.
 (function () {
   "use strict";
 
   const RAD = Math.PI / 180;
 
-  // fov: ángulo sobre el lado corto de la pantalla.
-  const MODOS = {
-    normal: { d: 0, fov: 75, min: 25, max: 110, pitch: null },
-    angular: { d: 0.6, fov: 150, min: 90, max: 200, pitch: null },
-    planeta: { d: 1, fov: 230, min: 140, max: 310, pitch: -90 },
-    cristal: { d: 1, fov: 230, min: 140, max: 310, pitch: 90 },
+  // z -> [fov sobre el lado corto, d]
+  const CURVA = [
+    [0.0, 25, 0],
+    [0.3, 75, 0],
+    [0.5, 140, 0.55],
+    [0.7, 200, 1],
+    [1.0, 300, 1],
+  ];
+  const MODOS = { normal: 0.3, angular: 0.5, planeta: 0.92, cristal: 0.92 };
+
+  const suave = (a, b, x) => {
+    const t = Math.min(1, Math.max(0, (x - a) / (b - a)));
+    return t * t * (3 - 2 * t);
   };
+
+  function enCurva(z) {
+    for (let i = 1; i < CURVA.length; i++) {
+      if (z <= CURVA[i][0]) {
+        const [z0, f0, d0] = CURVA[i - 1], [z1, f1, d1] = CURVA[i];
+        const t = suave(0, 1, (z - z0) / (z1 - z0));
+        return { fov: f0 + (f1 - f0) * t, d: d0 + (d1 - d0) * t };
+      }
+    }
+    return { fov: 300, d: 1 };
+  }
 
   const VS = `#version 300 es
   in vec2 p; out vec2 ndc;
@@ -22,16 +42,32 @@
   precision highp float;
   in vec2 ndc; out vec4 color;
   uniform sampler2D img;
-  uniform mat3 M;       // cámara -> mundo
-  uniform vec2 k;       // medio ancho/alto del plano de proyección
-  uniform float d;
+  uniform mat3 M;          // cámara -> mundo
+  uniform vec2 kG, kP;     // medio ancho/alto del plano: perspectiva general y Pannini
+  uniform float d, dP, mezcla;  // mezcla: 0 = Pannini, 1 = perspectiva general
   const float PI = 3.14159265358979;
-  void main() {
-    vec3 q = vec3(ndc * k, 1.0 + d);
+
+  vec3 general(vec2 s) {
+    vec3 q = vec3(s, 1.0 + d);
     float qq = dot(q, q);
     float b = d * (1.0 + d);
     float t = (b + sqrt(max(b * b - qq * (d * d - 1.0), 0.0))) / qq;
-    vec3 v = M * normalize(vec3(0.0, 0.0, -d) + t * q);
+    return normalize(vec3(0.0, 0.0, -d) + t * q);
+  }
+
+  vec3 pannini(vec2 s) {
+    float k = s.x * s.x / ((dP + 1.0) * (dP + 1.0));
+    float dscr = k * k * dP * dP - (k + 1.0) * (k * dP * dP - 1.0);
+    float clon = (-k * dP + sqrt(max(dscr, 0.0))) / (k + 1.0);
+    float S = (dP + 1.0) / (dP + clon);
+    float lon = atan(s.x, S * clon);
+    float lat = atan(s.y / S);
+    return vec3(cos(lat) * sin(lon), sin(lat), cos(lat) * cos(lon));
+  }
+
+  void main() {
+    vec3 r = mezcla >= 1.0 ? general(ndc * kG) : normalize(mix(pannini(ndc * kP), general(ndc * kG), mezcla));
+    vec3 v = M * r;
     float lon = atan(v.x, v.z);
     float lat = asin(clamp(v.y, -1.0, 1.0));
     vec2 uv = vec2(lon / (2.0 * PI) + 0.5, 0.5 - lat / PI);
@@ -43,14 +79,14 @@
     color = vec4(textureGrad(img, uv, dx, dy).rgb, 1.0);
   }`;
 
+  function mul3(a, b) {
+    return a.map((f) => [0, 1, 2].map((j) => f[0] * b[0][j] + f[1] * b[1][j] + f[2] * b[2][j]));
+  }
+
   function matCamara(yaw, pitch) {
     const cy = Math.cos(yaw), sy = Math.sin(yaw), cp = Math.cos(pitch), sp = Math.sin(pitch);
     // Ry(yaw) · Rx(pitch): yaw positivo mira a la derecha, pitch positivo mira hacia arriba.
     return mul3([[cy, 0, sy], [0, 1, 0], [-sy, 0, cy]], [[1, 0, 0], [0, cp, sp], [0, -sp, cp]]);
-  }
-
-  function mul3(a, b) {
-    return a.map((f) => [0, 1, 2].map((j) => f[0] * b[0][j] + f[1] * b[1][j] + f[2] * b[2][j]));
   }
 
   // Orientación del teléfono (como DeviceOrientationControls de three.js), pasada a este sistema
@@ -66,7 +102,7 @@
   }
 
   class Visor {
-    constructor(contenedor, opciones) {
+    constructor(contenedor, opciones = {}) {
       this.el = contenedor;
       this.canvas = document.createElement("canvas");
       this.el.appendChild(this.canvas);
@@ -74,14 +110,14 @@
       if (!gl) throw new Error("Este navegador no puede mostrar fotos 360 (falta WebGL2).");
       this.gl = gl;
       this.yaw = 0;
-      this.pitch = 0;
-      this.modo = "normal";
-      this.d = 0;
-      this.fov = MODOS.normal.fov;
-      this.anim = null;
+      this.pitchUsuario = 0;
+      this.polo = -1; // -1: mini mundo (mirar al suelo), +1: bola (mirar al cielo)
+      this.z = this.zDestino = MODOS.normal;
+      this.recto = opciones.recto !== false;
       this.giro = null;
       this.autoRotar = opciones.autoRotar !== false;
       this.ultimaInteraccion = 0;
+      this.modoActual = null;
       this.alCambiarModo = opciones.alCambiarModo || (() => {});
       this._programa();
       this._eventos();
@@ -110,7 +146,8 @@
       const loc = gl.getAttribLocation(p, "p");
       gl.enableVertexAttribArray(loc);
       gl.vertexAttribPointer(loc, 2, gl.FLOAT, false, 0, 0);
-      this.u = { M: gl.getUniformLocation(p, "M"), k: gl.getUniformLocation(p, "k"), d: gl.getUniformLocation(p, "d") };
+      this.u = {};
+      for (const n of ["M", "kG", "kP", "d", "dP", "mezcla"]) this.u[n] = gl.getUniformLocation(p, n);
       this.tex = gl.createTexture();
     }
 
@@ -137,26 +174,30 @@
       this.cargada = true;
     }
 
-    // ----- Modos y zoom -----
+    // ----- Zoom continuo y modos -----
     cambiarModo(nombre) {
-      const m = MODOS[nombre];
-      if (!m) return;
-      this.modo = nombre;
-      this._animar({ d: m.d, fov: m.fov, pitch: m.pitch === null ? Math.max(-30, Math.min(30, this.pitch)) : m.pitch });
-      this.alCambiarModo(nombre);
+      if (!(nombre in MODOS)) return;
+      if (this.giro && nombre !== "normal") return;
+      if (nombre === "planeta") this.polo = -1;
+      if (nombre === "cristal") this.polo = 1;
+      this.zDestino = MODOS[nombre];
       this._tocar();
     }
 
-    zoom(factor) {
-      const m = MODOS[this.modo];
-      const destino = Math.max(m.min, Math.min(m.max, (this.anim ? this.anim.hasta.fov : this.fov) * factor));
-      this._animar({ fov: destino }, 250);
+    zoom(delta) {
+      // delta > 0 aleja (hacia mini mundo), < 0 acerca.
+      let z = Math.min(1, Math.max(0, this.zDestino + delta));
+      if (this.giro) z = Math.min(z, 0.4);
+      // Al empezar a alejarse más allá del gran angular se decide si sale mini mundo o bola,
+      // según si se estaba mirando hacia abajo o hacia arriba.
+      if (this.zDestino < 0.45 && z >= 0.45) this.polo = this.pitchUsuario > 20 ? 1 : -1;
+      this.zDestino = z;
       this._tocar();
     }
 
-    _animar(hasta, ms = 700) {
-      const desde = { d: this.d, fov: this.fov, pitch: this.pitch };
-      this.anim = { desde, hasta: { ...desde, ...hasta }, t0: performance.now(), ms };
+    ponerRecto(si) {
+      this.recto = si;
+      this._tocar();
     }
 
     // ----- Giroscopio -----
@@ -171,30 +212,27 @@
         this.giro.m = matDispositivo(e.alpha * RAD, e.beta * RAD, e.gamma * RAD, pantalla);
       };
       window.addEventListener("deviceorientation", this._alOrientar);
-      if (this.modo !== "normal") this.cambiarModo("normal");
+      this.zDestino = Math.min(this.zDestino, MODOS.normal);
       return true;
     }
 
     desactivarGiro() {
       if (!this.giro) return;
       window.removeEventListener("deviceorientation", this._alOrientar);
-      const m = this._matriz();
+      const m = this._matriz(0);
       this.yaw = Math.atan2(m[0][2], m[2][2]);
-      this.pitch = Math.asin(Math.max(-1, Math.min(1, m[1][2]))) / RAD;
+      this.pitchUsuario = Math.asin(Math.max(-1, Math.min(1, m[1][2]))) / RAD;
       this.giro = null;
     }
 
-    _matriz() {
+    _matriz(pitch) {
       if (this.giro && this.giro.m) {
         const g = this.giro.m;
-        if (this.giro.offset === null) {
-          // Que al activar se siga mirando hacia donde se miraba.
-          this.giro.offset = this.yaw - Math.atan2(g[0][2], g[2][2]);
-        }
+        if (this.giro.offset === null) this.giro.offset = this.yaw - Math.atan2(g[0][2], g[2][2]);
         const o = this.giro.offset;
         return mul3([[Math.cos(o), 0, Math.sin(o)], [0, 1, 0], [-Math.sin(o), 0, Math.cos(o)]], g);
       }
-      return matCamara(this.yaw, this.pitch * RAD);
+      return matCamara(this.yaw, pitch * RAD);
     }
 
     // ----- Interacción -----
@@ -208,11 +246,11 @@
       let pinch = null;
       c.style.touchAction = "none";
       c.addEventListener("pointerdown", (e) => {
-        c.setPointerCapture(e.pointerId);
+        try { c.setPointerCapture(e.pointerId); } catch (err) { /* puntero ya liberado */ }
         punteros.set(e.pointerId, { x: e.clientX, y: e.clientY });
         if (punteros.size === 2) {
           const [a, b] = [...punteros.values()];
-          pinch = { dist: Math.hypot(a.x - b.x, a.y - b.y), fov: this.fov };
+          pinch = { dist: Math.hypot(a.x - b.x, a.y - b.y), z: this.zDestino };
         }
         this._tocar();
       });
@@ -224,15 +262,14 @@
         p.y = e.clientY;
         if (punteros.size === 2 && pinch) {
           const [a, b] = [...punteros.values()];
-          const m = MODOS[this.modo];
-          this.fov = Math.max(m.min, Math.min(m.max, pinch.fov * pinch.dist / Math.max(1, Math.hypot(a.x - b.x, a.y - b.y))));
-          this.anim = null;
+          const razon = pinch.dist / Math.max(1, Math.hypot(a.x - b.x, a.y - b.y));
+          this.zoom(pinch.z + Math.log(razon) * 0.35 - this.zDestino);
         } else if (punteros.size === 1 && !this.giro) {
           // Arrastrar mueve la imagen con el dedo, más lento cuando hay zoom.
-          const grados = this._fovEfectivo() / Math.min(this.canvas.clientWidth, this.canvas.clientHeight);
+          const { fov, d } = enCurva(this.z);
+          const grados = (d > 0.5 ? fov / 3 : fov) / Math.min(c.clientWidth, c.clientHeight);
           this.yaw -= dx * grados * RAD;
-          this.pitch = Math.max(-90, Math.min(90, this.pitch + dy * grados));
-          if (this.anim) this.anim.hasta.pitch = this.pitch;
+          this.pitchUsuario = Math.max(-90, Math.min(90, this.pitchUsuario + dy * grados));
         }
         this._tocar();
       });
@@ -244,14 +281,10 @@
       c.addEventListener("pointercancel", soltar);
       c.addEventListener("wheel", (e) => {
         e.preventDefault();
-        this.zoom(e.deltaY > 0 ? 1.12 : 1 / 1.12);
+        const paso = e.deltaMode === 1 ? e.deltaY * 33 : e.deltaY;
+        this.zoom(Math.max(-0.08, Math.min(0.08, paso * 0.0005)));
       }, { passive: false });
-      c.addEventListener("dblclick", () => this.zoom(0.6));
-    }
-
-    _fovEfectivo() {
-      // Grados de escena por pixel aproximados según el modo.
-      return this.d > 0.5 ? this.fov / 3 : this.fov;
+      c.addEventListener("dblclick", () => this.zoom(-0.12));
     }
 
     _redimensionar() {
@@ -265,28 +298,49 @@
 
     _cuadro(t) {
       requestAnimationFrame((t2) => this._cuadro(t2));
-      if (this.anim) {
-        const a = this.anim;
-        const x = Math.min(1, (t - a.t0) / a.ms);
-        const e = x < 0.5 ? 4 * x * x * x : 1 - Math.pow(-2 * x + 2, 3) / 2;
-        for (const clave of ["d", "fov", "pitch"]) this[clave] = a.desde[clave] + (a.hasta[clave] - a.desde[clave]) * e;
-        if (x >= 1) this.anim = null;
+      const dt = Math.min(64, t - (this._t || t));
+      this._t = t;
+      // El zoom sigue a su destino con suavidad (rueda, botones y modos).
+      this.z += (this.zDestino - this.z) * (1 - Math.exp(-dt / 90));
+      if (Math.abs(this.zDestino - this.z) < 1e-4) this.z = this.zDestino;
+      if (this.autoRotar && !this.giro && t - this.ultimaInteraccion > 4000) this.yaw += 0.00025 * dt;
+
+      const modo = this.zDestino < 0.42 ? "normal" : this.zDestino < 0.7 ? "angular" : this.polo > 0 ? "cristal" : "planeta";
+      if (modo !== this.modoActual) {
+        this.modoActual = modo;
+        this.alCambiarModo(modo);
       }
-      if (this.autoRotar && !this.giro && t - this.ultimaInteraccion > 4000) this.yaw += 0.00025 * 16;
       if (!this.cargada) return;
+
+      const { fov, d } = enCurva(this.z);
+      // Al alejarse, la vista gira sola hacia el suelo (mini mundo) o el cielo (bola).
+      const s = suave(0.42, 0.72, this.z);
+      const pitch = this.pitchUsuario + (this.polo * 90 - this.pitchUsuario) * s;
+      const mezcla = this.recto ? suave(0.45, 0.72, this.z) : 1;
+      const dP = suave(0.15, 0.5, this.z);
 
       const gl = this.gl;
       const W = this.canvas.width, H = this.canvas.height;
       gl.viewport(0, 0, W, H);
-      // El fov se reparte sobre el lado corto; no puede pasar el límite de la proyección.
-      const limite = 2 * Math.acos(-this.d) / RAD - 2;
-      const mitad = (Math.min(this.fov, limite) / 2) * RAD;
-      const kCorto = ((1 + this.d) * Math.sin(mitad)) / (this.d + Math.cos(mitad));
-      const kx = W >= H ? kCorto * (W / H) : kCorto;
-      const ky = W >= H ? kCorto : kCorto * (H / W);
-      gl.uniform2f(this.u.k, kx, ky);
-      gl.uniform1f(this.u.d, this.d);
-      gl.uniformMatrix3fv(this.u.M, true, new Float32Array(this._matriz().flat()));
+      const ancho = W >= H;
+      // Perspectiva general: el fov se reparte sobre el lado corto, sin pasar el límite de la proyección.
+      const lim = 2 * Math.acos(-d) / RAD - 2;
+      const m = (Math.min(fov, lim) / 2) * RAD;
+      const kc = ((1 + d) * Math.sin(m)) / (d + Math.cos(m));
+      gl.uniform2f(this.u.kG, ancho ? kc * W / H : kc, ancho ? kc : kc * H / W);
+      // Pannini: mismo fov sobre el lado corto (vertical: tangente; horizontal: fórmula de Pannini).
+      const mp = (Math.min(fov, 150) / 2) * RAD;
+      if (ancho) {
+        const ky = Math.tan(mp);
+        gl.uniform2f(this.u.kP, ky * W / H, ky);
+      } else {
+        const kx = ((dP + 1) * Math.sin(mp)) / (dP + Math.cos(mp));
+        gl.uniform2f(this.u.kP, kx, kx * H / W);
+      }
+      gl.uniform1f(this.u.d, d);
+      gl.uniform1f(this.u.dP, dP);
+      gl.uniform1f(this.u.mezcla, mezcla);
+      gl.uniformMatrix3fv(this.u.M, true, new Float32Array(this._matriz(pitch).flat()));
       gl.drawArrays(gl.TRIANGLES, 0, 3);
     }
   }

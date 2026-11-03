@@ -17,12 +17,14 @@ import numpy as np
 
 PATRON = re.compile(rb"2_2\.000000_[-0-9._]+")
 MAGIA = b"8db42d694ccc418790edff439fe026bf"  # fin del trailer Insta360
-FEATHER = np.radians(3)  # ancho de la mezcla en la costura
+FEATHER = np.radians(2)  # media franja de mezcla alrededor de la línea de corte
 # Paralaje: los lentes están ~3 cm separados, así que lo cercano no calza a la misma distancia
 # en toda la costura. Se prueba cada distancia (como 1/d) y se elige la que mejor calza por ángulo.
 INV_D = np.linspace(0, 2.0, 21)  # infinito .. 50 cm
 N_PHI = 720  # ángulos a lo largo de la costura (cada 0,5°)
-N_TH = 24
+N_TH = 24  # filas de la franja de solape, de 84° a 96°
+TH_BANDA = np.linspace(84, 96, N_TH)
+FILAS_CORTE = range(4, N_TH - 4)  # dónde puede ir la línea de corte (86°–94°)
 MUESTRAS_NIVEL = 200  # ~0,2 s del acelerómetro al momento de la foto
 
 
@@ -152,14 +154,12 @@ def _banda(img, lentes, rots, trasl, escala, inv_d):
     return salida
 
 
-def elegir_distancias(costos):
-    """costos (len(INV_D), N_PHI) -> índice de distancia por ángulo de la costura, suave (programación dinámica)."""
+def _camino(costos, lam_rel):
+    """costos (K, N_PHI) -> índice por ángulo, suave: programación dinámica sobre el círculo de la costura."""
     k, n = costos.shape
-    nucleo = np.ones(9) / 9
-    c = np.stack([np.convolve(np.r_[f[-4:], f, f[:4]], nucleo, "valid") for f in costos])
-    lam = 0.15 * float(np.median(c)) + 1e-6
+    lam = lam_rel * float(np.median(costos)) + 1e-6
     salto = lam * np.abs(np.arange(k)[:, None] - np.arange(k)[None, :])
-    c3 = np.concatenate([c, c, c], 1)  # la costura es un círculo: se resuelve 3 vueltas y se usa la del medio
+    c3 = np.concatenate([costos, costos, costos], 1)  # 3 vueltas, se usa la del medio
     acum = c3[:, 0].copy()
     desde = np.zeros((3 * n, k), int)
     for j in range(1, 3 * n):
@@ -173,21 +173,40 @@ def elegir_distancias(costos):
     return idx[n:2 * n]
 
 
-def distancias_costura(img, lentes, rots, trasl):
-    """1/distancia (1/m) que mejor calza ambos lentes en cada ángulo de la costura, y ganancia de color."""
+def _suavizar_circular(x, ancho):
+    return np.convolve(np.r_[x[-ancho:], x, x[:ancho]], np.ones(2 * ancho + 1) / (2 * ancho + 1), "valid")
+
+
+def _gauss_circular(x, sigma):
+    r = int(3 * sigma)
+    g = np.exp(-0.5 * (np.arange(-r, r + 1) / sigma) ** 2)
+    return np.convolve(np.r_[x[-r:], x, x[:r]], g / g.sum(), "valid")
+
+
+def costura(img, lentes, rots, trasl):
+    """Por cada ángulo de la costura: 1/distancia que mejor calza ambos lentes y ángulo (θ) de la línea de corte."""
     gris = cv2.cvtColor(img, cv2.COLOR_RGB2GRAY) if img.ndim == 3 else img
     if gris.shape[1] > 3000:
         gris = cv2.resize(gris, (2976, 1488), interpolation=cv2.INTER_AREA)
     escala = gris.shape[1] / lentes[0]["w"]
-    costos = []
+    difs = []
     for inv in INV_D:
         a, b = _banda(gris, lentes, rots, trasl, escala, inv)
-        costos.append(np.abs((a - a.mean()) - (b - b.mean())).mean(0))
-    idx = elegir_distancias(np.array(costos))
-    inv_d = INV_D[idx]
-    g = np.exp(-0.5 * (np.arange(-6, 7) / 3) ** 2)
-    inv_d = np.convolve(np.r_[inv_d[-6:], inv_d, inv_d[:6]], g / g.sum(), "valid")
-    return inv_d
+        difs.append(np.abs((a - a.mean()) - (b - b.mean())))
+    difs = np.array(difs)  # (K, N_TH, N_PHI)
+
+    # 1) Distancia: error promedio en toda la franja, por ángulo.
+    costo_d = np.stack([_suavizar_circular(f, 4) for f in difs.mean(1)])
+    k = _camino(costo_d, 0.15)
+    inv_d = _gauss_circular(INV_D[k], 3)
+
+    # 2) Línea de corte: dentro del solape, por donde ambos lentes más coinciden a esa distancia.
+    d = difs[k, :, np.arange(N_PHI)].T  # (N_TH, N_PHI)
+    d = cv2.blur(d.astype(np.float32), (9, 7), borderType=cv2.BORDER_REPLICATE)
+    filas = np.array(list(FILAS_CORTE))
+    fila = _camino(d[filas], 0.3)
+    th_corte = _gauss_circular(TH_BANDA[filas[fila]], 2)
+    return inv_d, np.radians(th_corte)
 
 
 def _ganancias(img, lentes, rots, trasl, inv_d):
@@ -215,7 +234,10 @@ def unir(datos, img, ancho_salida=None, nivelar=True, paralaje=True):
 
     rots = _rotaciones(lentes)
     trasl = _traslaciones(datos)
-    inv_d = distancias_costura(img, lentes, rots, trasl) if paralaje else np.zeros(N_PHI)
+    if paralaje:
+        inv_d, th_corte = costura(img, lentes, rots, trasl)
+    else:
+        inv_d, th_corte = np.zeros(N_PHI), np.full(N_PHI, np.pi / 2)
     ganancias = _ganancias(img, lentes, rots, trasl, inv_d)
 
     salida = np.empty((H, W, 3), np.uint8)
@@ -233,15 +255,16 @@ def unir(datos, img, ancho_salida=None, nivelar=True, paralaje=True):
         pos = ((phi + np.pi) / (2 * np.pi) * N_PHI - 0.5) % N_PHI
         i0 = np.floor(pos).astype(int)
         fr = pos - i0
-        iv = inv_d[i0] * (1 - fr) + inv_d[(i0 + 1) % N_PHI] * fr
-        iv *= 1 - d[:, 2] ** 2
+        i1 = (i0 + 1) % N_PHI
+        iv = (inv_d[i0] * (1 - fr) + inv_d[i1] * fr) * (1 - d[:, 2] ** 2)
+        corte = th_corte[i0] * (1 - fr) + th_corte[i1] * fr
+        # Peso del lente frontal: 1 antes de la línea de corte, 0 después, con mezcla corta.
+        w1 = np.clip((corte + FEATHER - np.arccos(np.clip(d[:, 2], -1, 1))) / (2 * FEATHER), 0, 1).astype(np.float32)
 
         acum = np.zeros((d.shape[0], 3), np.float32)
         pesos = np.zeros(d.shape[0], np.float32)
-        for l, r, t, gan in zip(lentes, rots, trasl, ganancias):
-            u, v, theta = _proyectar(_hacia_lente(d, iv, t) @ r.T, l, escala)
-            # Peso 1 dentro del lente; baja suave en la costura (90° ± FEATHER).
-            w = np.clip((np.pi / 2 + FEATHER - theta) / (2 * FEATHER), 0, 1).astype(np.float32)
+        for l, r, t, gan, w in zip(lentes, rots, trasl, ganancias, (w1, 1 - w1)):
+            u, v, _ = _proyectar(_hacia_lente(d, iv, t) @ r.T, l, escala)
             muestra = cv2.remap(img, u.reshape(filas, W), v.reshape(filas, W), cv2.INTER_LINEAR,
                                 borderMode=cv2.BORDER_CONSTANT).reshape(-1, 3)
             acum += muestra * (w[:, None] * gan.astype(np.float32))
