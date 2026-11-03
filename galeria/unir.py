@@ -17,7 +17,12 @@ import numpy as np
 
 PATRON = re.compile(rb"2_2\.000000_[-0-9._]+")
 MAGIA = b"8db42d694ccc418790edff439fe026bf"  # fin del trailer Insta360
-FEATHER = np.radians(6)  # ancho de la mezcla en la costura
+FEATHER = np.radians(3)  # ancho de la mezcla en la costura
+# Paralaje: los lentes están ~3 cm separados, así que lo cercano no calza a la misma distancia
+# en toda la costura. Se prueba cada distancia (como 1/d) y se elige la que mejor calza por ángulo.
+INV_D = np.linspace(0, 2.0, 21)  # infinito .. 50 cm
+N_PHI = 720  # ángulos a lo largo de la costura (cada 0,5°)
+N_TH = 24
 MUESTRAS_NIVEL = 200  # ~0,2 s del acelerómetro al momento de la foto
 
 
@@ -108,7 +113,95 @@ def _proyectar(d, lente, escala):
     return u.astype(np.float32), v.astype(np.float32), theta
 
 
-def unir(datos, img, ancho_salida=None, nivelar=True):
+def _traslaciones(datos):
+    """Posición de cada lente (m) respecto al punto medio entre ambos, en el sistema del lente frontal."""
+    v = [float(x) for x in PATRON.search(datos).group().decode().split("_")[1:]]
+    t1, t2 = np.array(v[8:11]), np.array(v[19 + 8:19 + 11])
+    medio = (t1 + t2) / 2
+    return [t1 - medio, t2 - medio]
+
+
+def _rotaciones(lentes):
+    rots = []
+    for i, l in enumerate(lentes):
+        yaw, pitch, roll = l["ypr"]
+        r = _rot(yaw, -pitch, roll - np.pi / 2)
+        if i == 1:  # el lente trasero mira hacia atrás
+            r = r @ np.diag([-1.0, 1.0, -1.0])
+        rots.append(r)
+    return rots
+
+
+def _hacia_lente(d, inv_d, t):
+    """Dirección con que el lente ubicado en `t` ve el punto a distancia 1/inv_d en la dirección d."""
+    p = d - inv_d[:, None] * t
+    return p / np.linalg.norm(p, axis=1)[:, None]
+
+
+def _banda(img, lentes, rots, trasl, escala, inv_d):
+    """Muestras de cada lente sobre la franja de la costura (θ 84°–96°), para una distancia fija."""
+    phi = (np.arange(N_PHI) + 0.5) / N_PHI * 2 * np.pi - np.pi
+    th = np.radians(np.linspace(84, 96, N_TH))
+    PH, TH = np.meshgrid(phi, th)
+    d = np.stack([np.sin(TH) * np.cos(PH), np.sin(TH) * np.sin(PH), np.cos(TH)], -1).reshape(-1, 3)
+    iv = np.full(len(d), inv_d)
+    salida = []
+    for l, r, t in zip(lentes, rots, trasl):
+        u, v, _ = _proyectar(_hacia_lente(d, iv, t) @ r.T, l, escala)
+        salida.append(cv2.remap(img, u.reshape(N_TH, N_PHI), v.reshape(N_TH, N_PHI), cv2.INTER_LINEAR).astype(np.float32))
+    return salida
+
+
+def elegir_distancias(costos):
+    """costos (len(INV_D), N_PHI) -> índice de distancia por ángulo de la costura, suave (programación dinámica)."""
+    k, n = costos.shape
+    nucleo = np.ones(9) / 9
+    c = np.stack([np.convolve(np.r_[f[-4:], f, f[:4]], nucleo, "valid") for f in costos])
+    lam = 0.15 * float(np.median(c)) + 1e-6
+    salto = lam * np.abs(np.arange(k)[:, None] - np.arange(k)[None, :])
+    c3 = np.concatenate([c, c, c], 1)  # la costura es un círculo: se resuelve 3 vueltas y se usa la del medio
+    acum = c3[:, 0].copy()
+    desde = np.zeros((3 * n, k), int)
+    for j in range(1, 3 * n):
+        total = acum[None, :] + salto
+        desde[j] = total.argmin(1)
+        acum = total.min(1) + c3[:, j]
+    idx = np.empty(3 * n, int)
+    idx[-1] = acum.argmin()
+    for j in range(3 * n - 1, 0, -1):
+        idx[j - 1] = desde[j, idx[j]]
+    return idx[n:2 * n]
+
+
+def distancias_costura(img, lentes, rots, trasl):
+    """1/distancia (1/m) que mejor calza ambos lentes en cada ángulo de la costura, y ganancia de color."""
+    gris = cv2.cvtColor(img, cv2.COLOR_RGB2GRAY) if img.ndim == 3 else img
+    if gris.shape[1] > 3000:
+        gris = cv2.resize(gris, (2976, 1488), interpolation=cv2.INTER_AREA)
+    escala = gris.shape[1] / lentes[0]["w"]
+    costos = []
+    for inv in INV_D:
+        a, b = _banda(gris, lentes, rots, trasl, escala, inv)
+        costos.append(np.abs((a - a.mean()) - (b - b.mean())).mean(0))
+    idx = elegir_distancias(np.array(costos))
+    inv_d = INV_D[idx]
+    g = np.exp(-0.5 * (np.arange(-6, 7) / 3) ** 2)
+    inv_d = np.convolve(np.r_[inv_d[-6:], inv_d, inv_d[:6]], g / g.sum(), "valid")
+    return inv_d
+
+
+def _ganancias(img, lentes, rots, trasl, inv_d):
+    """Iguala el color de los dos lentes en la costura (mitad de la corrección a cada uno)."""
+    chica = cv2.resize(img, (2976, 1488), interpolation=cv2.INTER_AREA) if img.shape[1] > 3000 else img
+    escala = chica.shape[1] / lentes[0]["w"]
+    a, b = _banda(chica, lentes, rots, trasl, escala, float(np.median(inv_d)))
+    m1 = a.reshape(-1, 3).mean(0) + 1
+    m2 = b.reshape(-1, 3).mean(0) + 1
+    g = np.clip(np.sqrt(m2 / m1), 0.8, 1.25)
+    return [g, 1 / g]
+
+
+def unir(datos, img, ancho_salida=None, nivelar=True, paralaje=True):
     """`datos`: bytes del .insp; `img`: array RGB (H, W, 3) del mismo archivo. Devuelve RGB 2:1."""
     lentes = leer_calibracion(datos)
     escala = img.shape[1] / lentes[0]["w"]
@@ -120,13 +213,10 @@ def unir(datos, img, ancho_salida=None, nivelar=True):
     if g is not None:
         nivel = _alinear(np.array([0.0, 1.0, 0.0]), g)
 
-    rots = []
-    for i, l in enumerate(lentes):
-        yaw, pitch, roll = l["ypr"]
-        r = _rot(yaw, -pitch, roll - np.pi / 2)
-        if i == 1:  # el lente trasero mira hacia atrás
-            r = r @ np.diag([-1.0, 1.0, -1.0])
-        rots.append(r @ nivel)
+    rots = _rotaciones(lentes)
+    trasl = _traslaciones(datos)
+    inv_d = distancias_costura(img, lentes, rots, trasl) if paralaje else np.zeros(N_PHI)
+    ganancias = _ganancias(img, lentes, rots, trasl, inv_d)
 
     salida = np.empty((H, W, 3), np.uint8)
     lon = (np.arange(W) + 0.5) / W * 2 * np.pi - np.pi
@@ -137,16 +227,24 @@ def unir(datos, img, ancho_salida=None, nivelar=True):
         lat = np.pi / 2 - (np.arange(f0, f1) + 0.5) / H * np.pi
         LON, LAT = np.meshgrid(lon, lat)
         d = np.stack([np.cos(LAT) * np.sin(LON), -np.sin(LAT), np.cos(LAT) * np.cos(LON)], -1).reshape(-1, 3)
+        d = d @ nivel.T  # al sistema de la cámara
+        # Distancia de la costura según el ángulo; se desvanece hacia el centro de cada lente.
+        phi = np.arctan2(d[:, 1], d[:, 0])
+        pos = ((phi + np.pi) / (2 * np.pi) * N_PHI - 0.5) % N_PHI
+        i0 = np.floor(pos).astype(int)
+        fr = pos - i0
+        iv = inv_d[i0] * (1 - fr) + inv_d[(i0 + 1) % N_PHI] * fr
+        iv *= 1 - d[:, 2] ** 2
 
         acum = np.zeros((d.shape[0], 3), np.float32)
         pesos = np.zeros(d.shape[0], np.float32)
-        for l, r in zip(lentes, rots):
-            u, v, theta = _proyectar(d @ r.T, l, escala)
+        for l, r, t, gan in zip(lentes, rots, trasl, ganancias):
+            u, v, theta = _proyectar(_hacia_lente(d, iv, t) @ r.T, l, escala)
             # Peso 1 dentro del lente; baja suave en la costura (90° ± FEATHER).
             w = np.clip((np.pi / 2 + FEATHER - theta) / (2 * FEATHER), 0, 1).astype(np.float32)
             muestra = cv2.remap(img, u.reshape(filas, W), v.reshape(filas, W), cv2.INTER_LINEAR,
                                 borderMode=cv2.BORDER_CONSTANT).reshape(-1, 3)
-            acum += muestra * w[:, None]
+            acum += muestra * (w[:, None] * gan.astype(np.float32))
             pesos += w
         bloque = acum / np.maximum(pesos, 1e-6)[:, None]
         salida[f0:f1] = np.clip(bloque, 0, 255).astype(np.uint8).reshape(filas, W, 3)

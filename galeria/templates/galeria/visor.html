@@ -1,101 +1,122 @@
 {% extends "galeria/base.html" %}
+{% load static %}
 {% block titulo %}{{ album.titulo }} · {{ posicion }}/{{ fotos|length }}{% endblock %}
 {% block head %}
-<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/pannellum/2.5.6/pannellum.css">
-<script src="https://cdnjs.cloudflare.com/ajax/libs/pannellum/2.5.6/pannellum.js"></script>
+<script src="{% static 'galeria/visor360.js' %}"></script>
 <style>
   html, body { height: 100%; overflow: hidden; background: #000; }
-  #pano { position: fixed; inset: 0; }
-  .capa { position: fixed; left: 0; right: 0; display: flex; align-items: center; gap: 8px;
-    padding: 10px 12px; z-index: 10; color: #fff; pointer-events: none; }
-  .capa > * { pointer-events: auto; }
-  .arriba { top: 0; background: linear-gradient(rgba(0,0,0,.55), transparent); }
-  .abajo { bottom: 0; justify-content: center; background: linear-gradient(transparent, rgba(0,0,0,.55));
+  #pano { position: fixed; inset: 0; cursor: grab; }
+  #pano:active { cursor: grabbing; }
+  .capa { position: fixed; z-index: 10; display: flex; align-items: center; gap: 8px; color: #fff; }
+  .arriba { top: 0; left: 0; right: 0; padding: 10px 12px; padding-top: max(10px, env(safe-area-inset-top)); }
+  .abajo { bottom: 0; left: 0; right: 0; justify-content: center; padding: 10px 12px;
     padding-bottom: max(12px, env(safe-area-inset-bottom)); }
-  .capa a, .capa button { color: #fff; background: rgba(0,0,0,.45); border: 1px solid rgba(255,255,255,.25);
-    border-radius: 8px; padding: 8px 12px; font-size: .9rem; text-decoration: none; cursor: pointer; }
+  .lado { top: 50%; transform: translateY(-50%); flex-direction: column; right: 12px; }
+  .capa a, .capa button { color: #fff; background: rgba(0,0,0,.5); border: 1px solid rgba(255,255,255,.22);
+    border-radius: 8px; padding: 8px 12px; font: inherit; font-size: .9rem; text-decoration: none; cursor: pointer;
+    min-width: 40px; text-align: center; }
   .capa a.desactivado { opacity: .3; pointer-events: none; }
-  .titulo { flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-size: .95rem; }
-  #giro[hidden] { display: none; }
-  #giro.activo { background: rgba(255,255,255,.9); color: #000; }
-  .pnlm-load-box { background: rgba(0,0,0,.6); }
-  .pnlm-controls-container { top: 64px !important; }
+  .titulo { flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-size: .95rem;
+    text-shadow: 0 1px 2px rgba(0,0,0,.6); }
+  .modos { display: inline-flex; border: 1px solid rgba(255,255,255,.22); border-radius: 8px; overflow: hidden; }
+  .modos button { border: 0; border-radius: 0; background: rgba(0,0,0,.5); }
+  .modos button + button { border-left: 1px solid rgba(255,255,255,.22); }
+  .capa button[aria-pressed="true"] { background: rgba(255,255,255,.92); color: #000; }
+  #aviso { position: fixed; inset: 0; display: grid; place-items: center; color: #ddd; z-index: 5; pointer-events: none; }
+  [hidden] { display: none !important; }
+  @media (max-width: 520px) {
+    .modos button { padding: 8px 9px; font-size: .85rem; }
+    .lado { top: auto; bottom: 64px; transform: none; }
+  }
 </style>
 {% endblock %}
 {% block cuerpo %}
 <div id="pano"></div>
+<div id="aviso">Cargando…</div>
+
 <div class="capa arriba">
   <a href="{% url 'album_publico' album.token %}">← Álbum</a>
   <span class="titulo">{{ album.titulo }} · {{ posicion }} de {{ fotos|length }}</span>
   <a href="{% url 'descargar' album.token foto.uid %}" title="Descargar la foto original">Descargar</a>
 </div>
-<div class="capa abajo">
-  <a href="{% if anterior %}{% url 'visor' album.token anterior.uid.hex %}{% endif %}" class="{% if not anterior %}desactivado{% endif %}" id="ant">‹ Anterior</a>
-  <button type="button" id="giro" hidden>Mover el teléfono</button>
-  <a href="{% if siguiente %}{% url 'visor' album.token siguiente.uid.hex %}{% endif %}" class="{% if not siguiente %}desactivado{% endif %}" id="sig">Siguiente ›</a>
+
+<div class="capa lado">
+  <button type="button" id="mas" title="Acercar">+</button>
+  <button type="button" id="menos" title="Alejar">−</button>
+  <button type="button" id="completa" title="Pantalla completa">⛶</button>
+  <button type="button" id="giro" title="Mirar moviendo el teléfono" aria-pressed="false" hidden>Mover</button>
 </div>
+
+<div class="capa abajo">
+  <a href="{% if anterior %}{% url 'visor' album.token anterior.uid.hex %}{% endif %}" class="{% if not anterior %}desactivado{% endif %}" id="ant" title="Foto anterior">‹</a>
+  <div class="modos" role="group" aria-label="Vista">
+    <button type="button" data-modo="normal" aria-pressed="true">Normal</button>
+    <button type="button" data-modo="angular" aria-pressed="false">Angular</button>
+    <button type="button" data-modo="planeta" aria-pressed="false">Mini mundo</button>
+    <button type="button" data-modo="cristal" aria-pressed="false">Bola</button>
+  </div>
+  <a href="{% if siguiente %}{% url 'visor' album.token siguiente.uid.hex %}{% endif %}" class="{% if not siguiente %}desactivado{% endif %}" id="sig" title="Foto siguiente">›</a>
+</div>
+
 <script>
 (function () {
-  // Elegir resolución según lo que aguante la GPU y la pantalla (las fotos de 8K no caben en muchos teléfonos).
-  let maxTex = 4096;
+  const aviso = document.getElementById("aviso");
+  let visor;
   try {
-    const gl = document.createElement("canvas").getContext("webgl");
-    if (gl) maxTex = gl.getParameter(gl.MAX_TEXTURE_SIZE);
-  } catch (e) {}
-  const grande = maxTex >= 8192 && Math.max(screen.width, screen.height) >= 1000;
-  const imagen = grande ? "{{ foto.vista.url }}" : "{{ foto.vista_chica.url }}";
-
-  const visor = pannellum.viewer("pano", {
-    type: "equirectangular",
-    panorama: imagen,
-    preview: "{{ foto.miniatura.url }}",
-    autoLoad: true,
-    autoRotate: -2,
-    autoRotateInactivityDelay: 4000,
-    showControls: true,
-    showZoomCtrl: false,
-    compass: false,
-    hfov: 100,
-    minHfov: 40,
-    maxHfov: 120,
-    strings: {
-      loadingLabel: "Cargando…",
-      loadButtonLabel: "Toca para cargar",
-      bylineLabel: "",
-      genericWebGLError: "Tu navegador no soporta el visor 360.",
-      textureSizeError: "La foto es demasiado grande para este dispositivo.",
-      iOS8WebGLError: "Actualiza tu teléfono para ver fotos 360.",
-      unknownError: "No se pudo cargar la foto.",
-    },
-  });
-
-  // Giroscopio: en iPhone requiere permiso explícito con un toque del usuario.
-  const giro = document.getElementById("giro");
-  if (window.DeviceOrientationEvent && "ontouchstart" in window) {
-    giro.hidden = false;
-    let activo = false;
-    giro.onclick = async () => {
-      if (activo) { visor.stopOrientation(); activo = false; giro.classList.remove("activo"); return; }
-      if (typeof DeviceOrientationEvent.requestPermission === "function") {
-        try { if ((await DeviceOrientationEvent.requestPermission()) !== "granted") return; } catch (e) { return; }
-      }
-      visor.startOrientation();
-      activo = true;
-      giro.classList.add("activo");
-    };
+    visor = new Visor360(document.getElementById("pano"), {
+      alCambiarModo: (m) => {
+        document.querySelectorAll("[data-modo]").forEach((b) => b.setAttribute("aria-pressed", b.dataset.modo === m));
+        try { localStorage.setItem("visor360-modo", m); } catch (e) {}
+      },
+    });
+  } catch (e) {
+    aviso.textContent = e.message;
+    return;
   }
 
-  // Flechas del teclado para pasar de foto.
+  // Resolución según lo que aguante la GPU y la pantalla (8K no cabe en muchos teléfonos).
+  const grande = visor.maxTextura() >= 8192 && Math.max(screen.width, screen.height) * (devicePixelRatio || 1) >= 1600;
+  visor.cargar("{{ foto.miniatura.url }}")
+    .then(() => { aviso.hidden = true; return visor.cargar(grande ? "{{ foto.vista.url }}" : "{{ foto.vista_chica.url }}"); })
+    .catch((e) => { aviso.hidden = false; aviso.textContent = e.message; });
+
+  // Recordar la vista elegida al pasar de foto.
+  let modo = "normal";
+  try { modo = localStorage.getItem("visor360-modo") || "normal"; } catch (e) {}
+  if (modo !== "normal") visor.cambiarModo(modo);
+
+  document.querySelectorAll("[data-modo]").forEach((b) => (b.onclick = () => {
+    if (visor.giro) desactivarGiro();
+    visor.cambiarModo(b.dataset.modo);
+  }));
+  document.getElementById("mas").onclick = () => visor.zoom(0.8);
+  document.getElementById("menos").onclick = () => visor.zoom(1.25);
+
+  const completa = document.getElementById("completa");
+  if (!document.fullscreenEnabled) completa.hidden = true;
+  completa.onclick = () => document.fullscreenElement ? document.exitFullscreen() : document.documentElement.requestFullscreen();
+
+  // Giroscopio: en iPhone requiere permiso explícito con un toque.
+  const giro = document.getElementById("giro");
+  if (window.DeviceOrientationEvent && "ontouchstart" in window) giro.hidden = false;
+  function desactivarGiro() { visor.desactivarGiro(); giro.setAttribute("aria-pressed", "false"); }
+  giro.onclick = async () => {
+    if (visor.giro) return desactivarGiro();
+    try { if (await visor.activarGiro()) giro.setAttribute("aria-pressed", "true"); } catch (e) {}
+  };
+
   document.addEventListener("keydown", (e) => {
-    const destino = e.key === "PageDown" || (e.key === "ArrowRight" && e.shiftKey) ? "sig"
-      : e.key === "PageUp" || (e.key === "ArrowLeft" && e.shiftKey) ? "ant" : null;
-    const a = destino && document.getElementById(destino);
-    if (a && a.getAttribute("href")) location.href = a.getAttribute("href");
+    const ir = (id) => { const a = document.getElementById(id); if (a.getAttribute("href")) location.href = a.getAttribute("href"); };
+    if (e.key === "PageDown" || (e.key === "ArrowRight" && e.shiftKey)) ir("sig");
+    else if (e.key === "PageUp" || (e.key === "ArrowLeft" && e.shiftKey)) ir("ant");
+    else if (e.key === "+" || e.key === "=") visor.zoom(0.8);
+    else if (e.key === "-") visor.zoom(1.25);
+    else if (["1", "2", "3", "4"].includes(e.key)) visor.cambiarModo(["normal", "angular", "planeta", "cristal"][+e.key - 1]);
   });
 
   {% if siguiente %}
   // Precargar la siguiente para que el cambio sea rápido.
-  visor.on("load", () => { new Image().src = grande ? "{{ siguiente.vista.url }}" : "{{ siguiente.vista_chica.url }}"; });
+  setTimeout(() => fetch(grande ? "{{ siguiente.vista.url }}" : "{{ siguiente.vista_chica.url }}"), 3000);
   {% endif %}
 })();
 </script>

@@ -6,7 +6,12 @@
 
   const MAGIA = "8db42d694ccc418790edff439fe026bf";
   const MUESTRAS_NIVEL = 200;
-  const FEATHER = (6 * Math.PI) / 180;
+  const FEATHER = (3 * Math.PI) / 180;
+  // Paralaje: los lentes están ~3 cm separados. Se prueban distancias (como 1/d, de infinito a 50 cm)
+  // y en cada ángulo de la costura se usa la que mejor calza. Igual que en unir.py.
+  const INV_D = Array.from({ length: 21 }, (_, i) => i * 0.1);
+  const N_PHI = 720;
+  const N_TH = 24;
 
   function leerCalibracion(texto) {
     const m = texto.match(/2_2\.000000_[-0-9._]+/);
@@ -18,7 +23,7 @@
       const rad = (x) => (x * Math.PI) / 180;
       return {
         xi: p[0], fx: p[1], fy: p[2], cx: p[3], cy: p[4],
-        ypr: [rad(p[5]), rad(p[6]), rad(p[7])], k: p.slice(11, 14), p: p.slice(14, 16), w: p[16],
+        ypr: [rad(p[5]), rad(p[6]), rad(p[7])], t: p.slice(8, 11), k: p.slice(11, 14), p: p.slice(14, 16), w: p[16],
       };
     });
   }
@@ -85,14 +90,23 @@
   uniform vec2 salida;
   uniform float fila0;
   uniform float calW, calH;
-  uniform mat3 R[2];
+  uniform mat3 N;            // nivelación: mundo -> cámara
+  uniform mat3 R[2];         // cámara -> cada lente
+  uniform vec3 T[2], G[2];   // posición de cada lente (m) y ganancia de color
+  uniform sampler2D tInv;    // 1/distancia por ángulo de la costura (N_PHI x 1)
+  uniform int modo;          // 0: foto final; 1: franja de la costura en gris; 2: franja en color
+  uniform float invFijo;
   uniform float xi[2], fx[2], fy[2], cx[2], cy[2], k1[2], k2[2], k3[2], p1[2], p2[2];
   out vec4 color;
   const float PI = 3.14159265358979;
   const float FEATHER = ${FEATHER.toFixed(8)};
 
-  vec4 lente(int i, vec3 dw) {
-    vec3 d = R[i] * dw;
+  const float N_PHI = ${N_PHI}.0;
+  const int N_TH = ${N_TH};
+
+  // db: dirección en el sistema de la cámara; iv: 1/distancia del punto que se mira.
+  vec4 lente(int i, vec3 db, float iv) {
+    vec3 d = R[i] * normalize(db - iv * T[i]);
     float den = d.z + xi[i];
     float mx = d.x / den, my = d.y / den;
     float r2 = mx * mx + my * my;
@@ -102,18 +116,129 @@
     vec2 uv = vec2((fx[i] * dx + cx[i]) / calW, (fy[i] * dy + cy[i]) / calH);
     float theta = acos(clamp(d.z, -1.0, 1.0));
     float w = clamp((PI / 2.0 + FEATHER - theta) / (2.0 * FEATHER), 0.0, 1.0);
+    if (modo != 0) return vec4(texture(img, uv).rgb, 1.0);
     return vec4(texture(img, uv).rgb * w, w);
   }
 
+  float invEn(vec3 db) {
+    float pos = mod((atan(db.y, db.x) + PI) / (2.0 * PI) * N_PHI - 0.5, N_PHI);
+    int i0 = int(floor(pos));
+    float a = texelFetch(tInv, ivec2(i0, 0), 0).r;
+    float b = texelFetch(tInv, ivec2((i0 + 1) % int(N_PHI), 0), 0).r;
+    return mix(a, b, fract(pos)) * (1.0 - db.z * db.z);  // se desvanece hacia el centro de cada lente
+  }
+
   void main() {
+    if (modo != 0) {
+      // Franja de la costura: x = ángulo, filas 0..N_TH-1 lente 1, N_TH..2*N_TH-1 lente 2.
+      int fila = int(gl_FragCoord.y);
+      int i = fila / N_TH;
+      float th = radians(84.0 + 12.0 * float(fila % N_TH) / float(N_TH - 1));
+      float phi = gl_FragCoord.x / N_PHI * 2.0 * PI - PI;
+      vec3 db = vec3(sin(th) * cos(phi), sin(th) * sin(phi), cos(th));
+      vec3 c = lente(i, db, invFijo).rgb;
+      color = modo == 1 ? vec4(vec3(dot(c, vec3(0.299, 0.587, 0.114))), 1.0) : vec4(c, 1.0);
+      return;
+    }
     // Se dibuja por franjas; readPixels entrega la fila 0 primero, así que fila 0 = arriba de la franja.
     vec2 px = vec2(gl_FragCoord.x, fila0 + gl_FragCoord.y);
     float lon = px.x / salida.x * 2.0 * PI - PI;
     float lat = PI / 2.0 - px.y / salida.y * PI;
-    vec3 dw = vec3(cos(lat) * sin(lon), -sin(lat), cos(lat) * cos(lon));
-    vec4 a = lente(0, dw) + lente(1, dw);
-    color = vec4(a.rgb / max(a.a, 1e-6), 1.0);
+    vec3 db = N * vec3(cos(lat) * sin(lon), -sin(lat), cos(lat) * cos(lon));
+    float iv = invEn(db);
+    vec4 a = lente(0, db, iv);
+    vec4 b = lente(1, db, iv);
+    vec3 suma = a.rgb * G[0] + b.rgb * G[1];
+    color = vec4(suma / max(a.a + b.a, 1e-6), 1.0);
   }`;
+
+  // Dibuja la franja de la costura (N_PHI x 2·N_TH) con una distancia fija y la devuelve en RGBA.
+  function leerBanda(gl, u, modo, invFijo) {
+    const ancho = N_PHI, alto = 2 * N_TH;
+    const rb = gl.createRenderbuffer();
+    gl.bindRenderbuffer(gl.RENDERBUFFER, rb);
+    gl.renderbufferStorage(gl.RENDERBUFFER, gl.RGBA8, ancho, alto);
+    const fb = gl.createFramebuffer();
+    gl.bindFramebuffer(gl.FRAMEBUFFER, fb);
+    gl.framebufferRenderbuffer(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.RENDERBUFFER, rb);
+    gl.viewport(0, 0, ancho, alto);
+    gl.uniform1i(u("modo"), modo);
+    gl.uniform1f(u("invFijo"), invFijo);
+    gl.drawArrays(gl.TRIANGLES, 0, 3);
+    const px = new Uint8Array(ancho * alto * 4);
+    gl.readPixels(0, 0, ancho, alto, gl.RGBA, gl.UNSIGNED_BYTE, px);
+    gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+    gl.deleteFramebuffer(fb);
+    gl.deleteRenderbuffer(rb);
+    return px;
+  }
+
+  function buscarDistancias(gl, u) {
+    const n = N_PHI * N_TH;
+    const costos = INV_D.map((iv) => {
+      const px = leerBanda(gl, u, 1, iv);
+      let ma = 0, mb = 0;
+      for (let k = 0; k < n; k++) { ma += px[k * 4]; mb += px[(n + k) * 4]; }
+      ma /= n;
+      mb /= n;
+      const c = new Float64Array(N_PHI);
+      for (let f = 0; f < N_TH; f++) {
+        for (let j = 0; j < N_PHI; j++) {
+          const a = px[(f * N_PHI + j) * 4], b = px[((N_TH + f) * N_PHI + j) * 4];
+          c[j] += Math.abs(a - ma - (b - mb)) / N_TH;
+        }
+      }
+      return c;
+    });
+    const idx = elegirDistancias(costos);
+    const inv = Float64Array.from(idx, (k) => INV_D[k]);
+    const g = Array.from({ length: 13 }, (_, i) => Math.exp(-0.5 * ((i - 6) / 3) ** 2));
+    const sg = g.reduce((a, b) => a + b);
+    return Float32Array.from({ length: N_PHI }, (_, j) =>
+      g.reduce((acc, w, i) => acc + w * inv[(j + i - 6 + N_PHI) % N_PHI], 0) / sg);
+  }
+
+  // Programación dinámica: distancia por ángulo que minimiza el error sin saltos bruscos.
+  function elegirDistancias(costos) {
+    const K = costos.length, n = N_PHI;
+    const c = costos.map((f) => Float64Array.from({ length: n }, (_, j) => {
+      let s = 0;
+      for (let d = -4; d <= 4; d++) s += f[(j + d + n) % n];
+      return s / 9;
+    }));
+    const todos = c.flatMap((f) => Array.from(f)).sort((a, b) => a - b);
+    const lam = 0.15 * todos[Math.floor(todos.length / 2)] + 1e-6;
+    const largo = 3 * n; // la costura es un círculo: se resuelve 3 vueltas y se usa la del medio
+    let acum = Float64Array.from({ length: K }, (_, k) => c[k][0]);
+    const desde = new Int32Array(largo * K);
+    for (let j = 1; j < largo; j++) {
+      const nuevo = new Float64Array(K);
+      for (let k = 0; k < K; k++) {
+        let mejor = Infinity, arg = 0;
+        for (let q = 0; q < K; q++) {
+          const v = acum[q] + lam * Math.abs(k - q);
+          if (v < mejor) { mejor = v; arg = q; }
+        }
+        desde[j * K + k] = arg;
+        nuevo[k] = mejor + c[k][j % n];
+      }
+      acum = nuevo;
+    }
+    const idx = new Int32Array(largo);
+    idx[largo - 1] = acum.indexOf(Math.min(...acum));
+    for (let j = largo - 1; j > 0; j--) idx[j - 1] = desde[j * K + idx[j]];
+    return idx.slice(n, 2 * n);
+  }
+
+  function medirGanancias(gl, u, invFijo) {
+    const px = leerBanda(gl, u, 2, invFijo);
+    const n = N_PHI * N_TH;
+    const m = [[1, 1, 1], [1, 1, 1]];
+    for (let k = 0; k < 2 * n; k++) for (let ch = 0; ch < 3; ch++) m[k < n ? 0 : 1][ch] += px[k * 4 + ch] / n;
+    return [0, 1, 2].map((ch) => Math.min(1.25, Math.max(0.8, Math.sqrt(m[1][ch] / m[0][ch]))));
+  }
+
+  const mediana = (a) => Array.from(a).sort((x, y) => x - y)[Math.floor(a.length / 2)];
 
   function compilar(gl, tipo, src) {
     const s = gl.createShader(tipo);
@@ -179,11 +304,13 @@
     gl.uniform1f(u("calW"), lentes[0].w);
     gl.uniform1f(u("calH"), lentes[0].w / 2);
     const mats = lentes.map((l, i) => {
-      let r = rot(l.ypr[0], -l.ypr[1], l.ypr[2] - Math.PI / 2);
-      if (i === 1) r = mul(r, [[-1, 0, 0], [0, 1, 0], [0, 0, -1]]); // el lente trasero mira hacia atrás
-      return mul(r, nivel);
+      const r = rot(l.ypr[0], -l.ypr[1], l.ypr[2] - Math.PI / 2);
+      return i === 1 ? mul(r, [[-1, 0, 0], [0, 1, 0], [0, 0, -1]]) : r; // el lente trasero mira hacia atrás
     });
     gl.uniformMatrix3fv(u("R"), true, new Float32Array(mats.flat(2)));
+    gl.uniformMatrix3fv(u("N"), true, new Float32Array(nivel.flat()));
+    const medio = [0, 1, 2].map((j) => (lentes[0].t[j] + lentes[1].t[j]) / 2);
+    gl.uniform3fv(u("T"), new Float32Array(lentes.flatMap((l) => l.t.map((x, j) => x - medio[j]))));
     const par = (nombre, f) => gl.uniform1fv(u(nombre), new Float32Array(lentes.map(f)));
     par("xi", (l) => l.xi);
     par("fx", (l) => l.fx);
@@ -195,6 +322,21 @@
     par("k3", (l) => l.k[2]);
     par("p1", (l) => l.p[0]);
     par("p2", (l) => l.p[1]);
+
+    // Distancia de la costura por ángulo y ganancia de color entre lentes.
+    gl.uniform1i(u("img"), 0);
+    gl.uniform1i(u("tInv"), 1);
+    const inv = opciones.paralaje === false ? new Float32Array(N_PHI) : buscarDistancias(gl, u);
+    const ganancia = medirGanancias(gl, u, mediana(inv));
+    gl.uniform3fv(u("G"), new Float32Array([...ganancia, ...ganancia.map((x) => 1 / x)]));
+    const texInv = gl.createTexture();
+    gl.activeTexture(gl.TEXTURE1);
+    gl.bindTexture(gl.TEXTURE_2D, texInv);
+    gl.texImage2D(gl.TEXTURE_2D, 0, gl.R32F, N_PHI, 1, 0, gl.RED, gl.FLOAT, inv);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
+    gl.activeTexture(gl.TEXTURE0);
+    gl.uniform1i(u("modo"), 0);
 
     // Chrome achica en silencio los lienzos WebGL de más de ~33 MP, así que se dibuja
     // por franjas en un framebuffer y se arma la foto completa en un canvas 2D.
@@ -228,6 +370,7 @@
     gl.deleteFramebuffer(fb);
     gl.deleteRenderbuffer(rb);
     gl.deleteTexture(tex);
+    gl.deleteTexture(texInv);
     gl.getExtension("WEBGL_lose_context")?.loseContext();
     if (!salida) throw new Error("no se pudo generar el JPG");
     return salida;
