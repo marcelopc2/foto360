@@ -5,44 +5,40 @@
 <meta property="og:description" content="{{ fotos|length }} foto{{ fotos|length|pluralize }} 360">
 {% if album.portada_miniatura_url %}<meta property="og:image" content="{{ request.scheme }}://{{ request.get_host }}{{ album.portada_miniatura_url }}">{% endif %}
 <style>
-  .portada { position: relative; display: block; border-radius: 26px; overflow: hidden; margin-bottom: 18px; color: var(--texto); }
-  .portada img { width: 100%; aspect-ratio: 2 / 1; object-fit: cover; max-height: 62vh; }
-  .portada.propia img { aspect-ratio: auto; max-height: 70vh; }
-  .portada .texto { position: absolute; left: 0; right: 0; bottom: 0; padding: 22px; background: rgba(16, 16, 18, .62); backdrop-filter: blur(8px); }
-  .portada h1 { font-size: clamp(1.5rem, 4.5vw, 2.4rem); }
-  .portada .abrir { position: absolute; top: 16px; right: 16px; }
-  .intro { margin: 0 0 26px; }
-  @media (max-width: 560px) { .portada { border-radius: 20px; } .portada .texto { padding: 16px; } }
+  .encabezado { padding: 56px 0 32px; display: flex; align-items: flex-end; justify-content: space-between; gap: 20px; flex-wrap: wrap; }
+  .encabezado .intro { max-width: 60ch; margin: 14px 0 0; color: var(--suave); }
+  .portada { display: block; }
+  .portada img { width: 100%; aspect-ratio: 2 / 1; object-fit: cover; max-height: 72vh; border-radius: 2px; background: var(--elevada); }
+  .portada.propia img { aspect-ratio: auto; }
+  .portada:hover img { opacity: .94; }
+  .ayuda { margin: 12px 0 0; font-size: .85rem; color: var(--tenue); }
+  @media (max-width: 560px) { .encabezado { padding: 36px 0 22px; } }
 </style>
 {% endblock %}
 {% block contenido %}
-<div class="aparece">
-  {% if fotos %}
-    {% with primera=fotos.0 %}
-    <a class="portada{% if album.imagen_portada %} propia{% endif %}" href="{% url 'visor' album.token primera.uid.hex %}">
-      <img src="{{ album.portada_url }}" alt="">
-      <span class="boton primario abrir"><svg class="i"><use href="#i-ojo"/></svg>Recorrer</span>
-      <div class="texto">
-        <h1>{{ album.titulo }}</h1>
-        <p class="suave" style="margin:6px 0 0">{{ fotos|length }} foto{{ fotos|length|pluralize }} 360 · toca una para moverte dentro de ella</p>
-      </div>
-    </a>
-    {% endwith %}
-  {% else %}
-    <h1 style="margin-bottom:8px">{{ album.titulo }}</h1>
-  {% endif %}
-  {% if album.descripcion %}<p class="intro">{{ album.descripcion|linebreaksbr }}</p>{% endif %}
-</div>
+<header class="encabezado">
+  <div>
+    <h1>{{ album.titulo }}</h1>
+    <p class="meta">{{ fotos|length }} foto{{ fotos|length|pluralize }} 360{% if fotos and fotos.0.tomada %} · {{ fotos.0.tomada|date:"F Y" }}{% endif %}</p>
+    {% if album.descripcion %}<p class="intro">{{ album.descripcion|linebreaksbr }}</p>{% endif %}
+  </div>
+  {% if fotos %}<a class="boton primario" href="{% url 'visor' album.token fotos.0.uid.hex %}">Ver fotos</a>{% endif %}
+</header>
 
 {% if fotos %}
-<div class="grilla aparece">
+<a class="portada{% if album.imagen_portada %} propia{% endif %}" href="{% url 'visor' album.token fotos.0.uid.hex %}">
+  <img src="{{ album.portada_url }}" alt="Portada de {{ album.titulo }}">
+</a>
+<p class="ayuda">Abre una foto y arrastra para mirar alrededor.</p>
+
+<h2>Todas las fotos</h2>
+<div class="grilla">
   {% for foto in fotos %}
   <a class="tarjeta" href="{% url 'visor' album.token foto.uid.hex %}">
     <img class="foto" src="{{ foto.miniatura.url }}" alt="Foto 360 {{ forloop.counter }}" loading="lazy">
-    <span class="insignia">{{ forloop.counter }}</span>
     <div class="pie">
-      <span class="tenue">{% if foto.titulo %}{{ foto.titulo }}{% elif foto.tomada %}{{ foto.tomada|date:"j \\d\\e F Y" }}{% else %}Foto {{ forloop.counter }}{% endif %}</span>
-      <svg class="i" style="color:var(--ambar)"><use href="#i-adelante"/></svg>
+      <span class="suave">{% if foto.titulo %}{{ foto.titulo }}{% elif foto.tomada %}{{ foto.tomada|date:"j \d\e F, H:i" }}{% else %}Foto {{ forloop.counter }}{% endif %}</span>
+      <span class="numero">{{ forloop.counter }}</span>
     </div>
   </a>
   {% endfor %}

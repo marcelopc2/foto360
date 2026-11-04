@@ -1,45 +1,44 @@
 {% extends "galeria/base.html" %}
 {% block head %}
 <style>
-  .crear { display: flex; gap: 10px; margin-top: 20px; }
+  .crear { display: flex; gap: 8px; margin-top: 28px; max-width: 620px; }
   .crear input { flex: 1; }
-  .vacio { margin-top: 40px; text-align: center; padding: 48px 20px; border: 1.5px dashed var(--linea); border-radius: var(--radio); }
+  .vacio { margin-top: 48px; padding: 56px 20px; text-align: center; border: 1px dashed var(--linea-fuerte); border-radius: var(--radio); }
   @media (max-width: 520px) { .crear { flex-direction: column; } }
 </style>
 {% endblock %}
 {% block contenido %}
 <header class="cabecera">
-  <span class="marca"><span class="punto">360</span> Fotos 360</span>
+  <a class="marca" href="{% url 'inicio' %}">Fotos 360</a>
   <form method="post" action="{% url 'logout' %}">{% csrf_token %}
-    <button class="boton fantasma" type="submit"><svg class="i"><use href="#i-salir"/></svg>Salir</button>
+    <button class="boton fantasma" type="submit">Salir</button>
   </form>
 </header>
 
-<h1>Tus álbumes</h1>
+<h1>Álbumes</h1>
 <form method="post" class="crear">
   {% csrf_token %}
-  <input type="text" name="titulo" placeholder="Nombre del álbum nuevo, por ejemplo «Viaje al sur 2026»" required>
-  <button class="boton primario" type="submit"><svg class="i"><use href="#i-mas"/></svg>Crear álbum</button>
+  <input type="text" name="titulo" placeholder="Viaje al sur 2026" aria-label="Nombre del álbum nuevo" required>
+  <button class="boton primario" type="submit">Crear álbum</button>
 </form>
 
 {% if albums %}
 <h2>{{ albums|length }} álbum{{ albums|length|pluralize:"es" }}</h2>
-<div class="grilla aparece">
+<div class="grilla">
   {% for album in albums %}
   <a class="tarjeta" href="{% url 'album_admin' album.pk %}">
     {% if album.portada_miniatura_url %}<img class="foto" src="{{ album.portada_miniatura_url }}" alt="" loading="lazy">{% else %}<div class="foto"></div>{% endif %}
-    <span class="insignia">{{ album.fotos.all|length }} foto{{ album.fotos.all|length|pluralize }}</span>
     <div class="pie">
-      <div><strong>{{ album.titulo }}</strong><span class="tenue">{{ album.creado|date:"j M Y" }}</span></div>
-      <svg class="i" style="color:var(--tenue)"><use href="#i-adelante"/></svg>
+      <strong>{{ album.titulo }}</strong>
+      <span class="numero">{{ album.fotos.all|length }} foto{{ album.fotos.all|length|pluralize }}</span>
     </div>
   </a>
   {% endfor %}
 </div>
 {% else %}
 <div class="vacio">
-  <p style="margin:0 0 4px;font-weight:500">Aún no tienes álbumes</p>
-  <p class="suave" style="margin:0">Crea uno y arrastra ahí tus fotos .insp, tal como salen de la cámara.</p>
+  <p style="margin:0 0 4px;font-weight:500">Todavía no hay álbumes</p>
+  <p class="suave" style="margin:0">Crea uno y arrastra ahí los .insp tal como salen de la cámara.</p>
 </div>
 {% endif %}
 {% endblock %}
