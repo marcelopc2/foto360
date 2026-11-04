@@ -9,8 +9,9 @@ def nuevo_token():
 
 
 def ruta_foto(instance, filename, sufijo):
-    # Nombres aleatorios: las URLs de media no se pueden adivinar.
-    return f"albums/{instance.album.token}/{instance.uid.hex}{sufijo}.jpg"
+    # Nombres aleatorios: las URLs de media no se pueden adivinar. La parte final cambia en cada
+    # versión, así una foto re-procesada no se confunde con la que el navegador ya tiene en caché.
+    return f"albums/{instance.album.token}/{instance.uid.hex}{sufijo}_{secrets.token_hex(3)}.jpg"
 
 
 def ruta_original(instance, filename):
