@@ -21,14 +21,17 @@
   .redondo.desactivado { opacity: .35; pointer-events: none; }
 
   /* Arriba */
-  .arriba { top: max(12px, env(safe-area-inset-top)); left: 12px; display: flex; align-items: center; gap: 8px; max-width: calc(100% - 24px); }
-  .arriba .titulo { min-width: 0; max-width: min(320px, 60vw); padding: 6px 16px; border-radius: 999px; line-height: 1.25; }
-  .arriba .titulo strong { display: block; font-weight: 500; font-size: .95rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-  .arriba .titulo span { font-size: .75rem; color: var(--suave); }
+  .arriba { top: max(12px, env(safe-area-inset-top)); left: 12px; }
+  .contador { top: calc(max(12px, env(safe-area-inset-top)) + 11px); left: 50%; transform: translateX(-50%);
+    padding: 3px 11px; border-radius: 999px; font-size: .75rem; color: var(--suave); font-variant-numeric: tabular-nums; }
 
-  /* Riel derecho y flecha izquierda */
-  .riel { right: 12px; top: 50%; transform: translateY(-50%); display: flex; flex-direction: column; gap: 8px; }
-  .flecha { left: 12px; top: 50%; transform: translateY(-50%); }
+  /* Controles arriba a la derecha; flechas chicas a cada lado */
+  .riel { right: 12px; top: max(12px, env(safe-area-inset-top)); display: flex; flex-direction: column; gap: 8px; }
+  .flecha { top: 50%; transform: translateY(-50%); width: 34px; height: 34px; opacity: .8; }
+  .flecha:hover { opacity: 1; }
+  .flecha svg { width: 18px; height: 18px; }
+  #ant { left: 10px; }
+  #sig { right: 10px; }
 
   /* Barra inferior con botón central */
   .dock { left: 50%; transform: translateX(-50%); bottom: max(14px, env(safe-area-inset-bottom));
@@ -93,9 +96,7 @@
   @media (max-width: 560px) {
     .modo { min-width: 54px; padding: 7px 4px 6px; font-size: .64rem; }
     .fab { margin: -22px 4px 0; }
-    .riel { top: auto; bottom: calc(max(14px, env(safe-area-inset-bottom)) + 86px); transform: none; }
-    .flecha { top: auto; bottom: calc(max(14px, env(safe-area-inset-bottom)) + 86px); transform: none; }
-    body.encuadrando .riel, body.encuadrando .flecha { display: none; }  /* el zoom se hace con dos dedos */
+    body.encuadrando .flecha { display: none; }
   }
 </style>
 {% endblock %}
@@ -105,18 +106,13 @@
 <div id="marco" hidden><i></i><i></i><i></i><i></i><b></b><b></b><b></b><b></b><span class="formato" id="formatoTxt"></span></div>
 <div id="flash"></div>
 
-<header class="flota arriba">
-  <a class="redondo" href="{% url 'album_publico' album.token %}" title="Volver al álbum" aria-label="Volver al álbum"><svg class="i"><use href="#i-atras"/></svg></a>
-  <div class="titulo vidrio">
-    <strong>{{ album.titulo }}</strong>
-    <span>{{ posicion }} de {{ fotos|length }}{% if foto.tomada %} · {{ foto.tomada|date:"j M Y" }}{% endif %}</span>
-  </div>
-</header>
+<a class="flota redondo arriba" href="{% url 'album_publico' album.token %}" title="Volver al álbum «{{ album.titulo }}»" aria-label="Volver al álbum"><svg class="i"><use href="#i-cerrar"/></svg></a>
+{% if fotos|length > 1 %}<span class="flota vidrio contador" title="{{ album.titulo }}">{{ posicion }} / {{ fotos|length }}</span>{% endif %}
 
-<a class="flota redondo flecha {% if not anterior %}desactivado{% endif %}" id="ant" href="{% if anterior %}{% url 'visor' album.token anterior.uid.hex %}{% endif %}" title="Foto anterior" aria-label="Foto anterior"><svg class="i"><use href="#i-atras"/></svg></a>
+{% if anterior %}<a class="flota redondo flecha" id="ant" href="{% url 'visor' album.token anterior.uid.hex %}" title="Foto anterior" aria-label="Foto anterior"><svg class="i"><use href="#i-atras"/></svg></a>{% endif %}
+{% if siguiente %}<a class="flota redondo flecha" id="sig" href="{% url 'visor' album.token siguiente.uid.hex %}" title="Foto siguiente" aria-label="Foto siguiente"><svg class="i"><use href="#i-adelante"/></svg></a>{% endif %}
 
 <div class="flota riel">
-  <a class="redondo {% if not siguiente %}desactivado{% endif %}" id="sig" href="{% if siguiente %}{% url 'visor' album.token siguiente.uid.hex %}{% endif %}" title="Foto siguiente" aria-label="Foto siguiente"><svg class="i"><use href="#i-adelante"/></svg></a>
   <button type="button" class="redondo" id="recto" title="Recto: endereza las líneas en las vistas anchas" aria-label="Enderezar líneas" aria-pressed="true"><svg class="i"><use href="#i-recto"/></svg></button>
   <button type="button" class="redondo" id="completa" title="Pantalla completa" aria-label="Pantalla completa"><svg class="i"><use href="#i-completa"/></svg></button>
   <button type="button" class="redondo" id="giro" title="Mirar moviendo el teléfono" aria-label="Mirar moviendo el teléfono" aria-pressed="false" hidden><svg class="i"><use href="#i-mover"/></svg></button>
@@ -237,7 +233,7 @@
     const arriba = document.querySelector(".arriba").getBoundingClientRect().bottom + 12;
     const abajo = vh - hoja.getBoundingClientRect().top + 12;
     const margenV = Math.max(arriba, abajo);       // centrado: igual arriba y abajo
-    const margenH = vw > 700 ? 76 : 16;            // espacio para el riel en pantallas anchas
+    const margenH = vw > 700 ? 76 : 60;            // espacio para los botones de la derecha
     const maxW = vw - 2 * margenH, maxH = vh - 2 * margenV;
     const r = proporcion();
     let w = maxW, h = w / r;
@@ -311,7 +307,7 @@
   };
 
   document.addEventListener("keydown", (e) => {
-    const ir = (id) => { const a = $(id); if (a.getAttribute("href")) location.href = a.getAttribute("href"); };
+    const ir = (id) => { const a = $(id); if (a) location.href = a.getAttribute("href"); };
     if (e.key === "Escape" && !hoja.hidden) cerrarEncuadre();
     else if (e.key === "PageDown" || (e.key === "ArrowRight" && e.shiftKey)) ir("sig");
     else if (e.key === "PageUp" || (e.key === "ArrowLeft" && e.shiftKey)) ir("ant");
