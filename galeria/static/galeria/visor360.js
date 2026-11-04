@@ -260,6 +260,8 @@
       c.addEventListener("pointerdown", (e) => {
         try { c.setPointerCapture(e.pointerId); } catch (err) { /* puntero ya liberado */ }
         punteros.set(e.pointerId, { x: e.clientX, y: e.clientY });
+        this.inercia = null; // tocar frena el deslizamiento
+        this._vel = { x: 0, y: 0, t: performance.now() };
         if (punteros.size === 2) {
           const [a, b] = [...punteros.values()];
           pinch = { dist: Math.hypot(a.x - b.x, a.y - b.y), z: this.zDestino };
@@ -277,24 +279,25 @@
           const razon = pinch.dist / Math.max(1, Math.hypot(a.x - b.x, a.y - b.y));
           this.zoom(pinch.z + Math.log(razon) * 0.35 - this.zDestino);
         } else if (punteros.size === 1 && !this.giro) {
-          // Arrastrar mueve la imagen con el dedo, más lento cuando hay zoom.
-          const { fov, d } = enCurva(this.z);
-          const grados = (d > 0.5 ? fov / 3 : fov) / Math.min(c.clientWidth, c.clientHeight);
-          this.yaw -= dx * grados * RAD;
-          if (this.s > 0.5) {
-            // Alejado: el arrastre vertical inclina sin tope (media pantalla ≈ 90°): del mini mundo
-            // pasa por el horizonte a la bola y, si se sigue, el planeta rueda y muestra el otro lado.
-            const p = this.pitchLejosDestino + dy * 180 / Math.min(c.clientWidth, c.clientHeight);
-            this.pitchLejos = this.pitchLejosDestino = p;
-          } else {
-            this.pitchUsuario = Math.max(-90, Math.min(90, this.pitchUsuario + dy * grados));
-          }
+          this._mover(dx, dy);
+          // Velocidad del dedo (px/ms, suavizada) para seguir deslizando al soltar.
+          const ahora = performance.now(), v = this._vel;
+          const dt = Math.max(1, ahora - v.t);
+          v.x = v.x * 0.6 + (dx / dt) * 0.4;
+          v.y = v.y * 0.6 + (dy / dt) * 0.4;
+          v.t = ahora;
         }
         this._tocar();
       });
       const soltar = (e) => {
+        const eraArrastre = punteros.size === 1 && !pinch;
         punteros.delete(e.pointerId);
         if (punteros.size < 2) pinch = null;
+        // Al soltar, la imagen sigue un poco y se frena de a poco (si el dedo venía moviéndose).
+        const v = this._vel;
+        if (eraArrastre && v && performance.now() - v.t < 80 && Math.hypot(v.x, v.y) > 0.05 && !this.giro) {
+          this.inercia = { x: v.x, y: v.y };
+        }
       };
       c.addEventListener("pointerup", soltar);
       c.addEventListener("pointercancel", soltar);
@@ -304,6 +307,22 @@
         this.zoom(Math.max(-0.08, Math.min(0.08, paso * 0.0005)));
       }, { passive: false });
       c.addEventListener("dblclick", () => this.zoom(-0.12));
+    }
+
+    // Mueve la vista como si se arrastrara dx, dy pixeles (más lento cuando hay zoom).
+    _mover(dx, dy) {
+      const c = this.canvas;
+      const { fov, d } = enCurva(this.z);
+      const lado = Math.min(c.clientWidth, c.clientHeight);
+      const grados = (d > 0.5 ? fov / 3 : fov) / lado;
+      this.yaw -= dx * grados * RAD;
+      if (this.s > 0.5) {
+        // Alejado: el arrastre vertical inclina sin tope (media pantalla ≈ 90°): del mini mundo
+        // pasa por el horizonte a la bola y, si se sigue, el planeta rueda y muestra el otro lado.
+        this.pitchLejos = this.pitchLejosDestino = this.pitchLejosDestino + dy * 180 / lado;
+      } else {
+        this.pitchUsuario = Math.max(-90, Math.min(90, this.pitchUsuario + dy * grados));
+      }
     }
 
     _redimensionar() {
@@ -322,6 +341,14 @@
       // El zoom sigue a su destino con suavidad (rueda, botones y modos).
       this.z += (this.zDestino - this.z) * (1 - Math.exp(-dt / 90));
       if (Math.abs(this.zDestino - this.z) < 1e-4) this.z = this.zDestino;
+      if (this.inercia) {
+        this._mover(this.inercia.x * dt, this.inercia.y * dt);
+        const roce = Math.exp(-dt / 320);
+        this.inercia.x *= roce;
+        this.inercia.y *= roce;
+        if (Math.hypot(this.inercia.x, this.inercia.y) < 0.01) this.inercia = null;
+        this._tocar();
+      }
       if (this.autoRotar && !this.giro && t - this.ultimaInteraccion > 4000) this.yaw += 0.00025 * dt;
 
       this.pitchLejos += (this.pitchLejosDestino - this.pitchLejos) * (1 - Math.exp(-dt / 90));

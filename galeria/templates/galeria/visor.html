@@ -21,8 +21,8 @@
   .redondo.desactivado { opacity: .35; pointer-events: none; }
 
   /* Arriba */
-  .arriba { top: max(12px, env(safe-area-inset-top)); left: 12px; right: 12px; display: flex; align-items: center; gap: 10px; }
-  .arriba .titulo { flex: 1; min-width: 0; padding: 7px 16px; border-radius: 999px; line-height: 1.25; }
+  .arriba { top: max(12px, env(safe-area-inset-top)); left: 12px; display: flex; align-items: center; gap: 8px; max-width: calc(100% - 24px); }
+  .arriba .titulo { min-width: 0; max-width: min(320px, 60vw); padding: 6px 16px; border-radius: 999px; line-height: 1.25; }
   .arriba .titulo strong { display: block; font-weight: 500; font-size: .95rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   .arriba .titulo span { font-size: .75rem; color: var(--suave); }
 
@@ -68,12 +68,20 @@
   .acciones { display: grid; grid-template-columns: 1fr auto 1fr; align-items: center; }
   .acciones .izq { justify-self: start; display: flex; gap: 8px; }
   .acciones .der { justify-self: end; }
+  .original { display: inline-flex; align-items: center; justify-content: center; gap: 6px; color: var(--tenue); font-size: .78rem; }
+  .original svg { width: 15px; height: 15px; }
+  .original:hover { color: var(--suave); }
   .obturador { width: 68px; height: 68px; border-radius: 50%; border: 0; padding: 0; cursor: pointer; background: transparent;
     display: grid; place-items: center; }
   .obturador span { width: 68px; height: 68px; border-radius: 50%; border: 4px solid var(--texto); display: grid; place-items: center; }
   .obturador span::after { content: ""; width: 52px; height: 52px; border-radius: 50%; background: var(--ambar); transition: transform .12s; }
   .obturador:active span::after { transform: scale(.88); }
   .obturador[disabled] { opacity: .5; cursor: wait; }
+
+  /* Pantalla completa: solo la foto y el botón para salir. */
+  #salirCompleta { display: none; position: fixed; z-index: 12; top: max(12px, env(safe-area-inset-top)); right: 12px; }
+  body.inmersivo .flota, body.inmersivo #marco { display: none !important; }
+  body.inmersivo #salirCompleta { display: grid; }
 
   #flash { position: fixed; inset: 0; z-index: 30; background: #fff; opacity: 0; pointer-events: none; }
   #flash.on { animation: flash .45s ease-out; }
@@ -103,15 +111,12 @@
     <strong>{{ album.titulo }}</strong>
     <span>{{ posicion }} de {{ fotos|length }}{% if foto.tomada %} · {{ foto.tomada|date:"j M Y" }}{% endif %}</span>
   </div>
-  <a class="redondo" href="{% url 'descargar' album.token foto.uid %}" title="Descargar la foto 360 completa" aria-label="Descargar la foto 360 completa"><svg class="i"><use href="#i-bajar"/></svg></a>
 </header>
 
 <a class="flota redondo flecha {% if not anterior %}desactivado{% endif %}" id="ant" href="{% if anterior %}{% url 'visor' album.token anterior.uid.hex %}{% endif %}" title="Foto anterior" aria-label="Foto anterior"><svg class="i"><use href="#i-atras"/></svg></a>
 
 <div class="flota riel">
   <a class="redondo {% if not siguiente %}desactivado{% endif %}" id="sig" href="{% if siguiente %}{% url 'visor' album.token siguiente.uid.hex %}{% endif %}" title="Foto siguiente" aria-label="Foto siguiente"><svg class="i"><use href="#i-adelante"/></svg></a>
-  <button type="button" class="redondo" id="mas" title="Acercar" aria-label="Acercar"><svg class="i"><use href="#i-mas"/></svg></button>
-  <button type="button" class="redondo" id="menos" title="Alejar" aria-label="Alejar"><svg class="i"><use href="#i-menos"/></svg></button>
   <button type="button" class="redondo" id="recto" title="Recto: endereza las líneas en las vistas anchas" aria-label="Enderezar líneas" aria-pressed="true"><svg class="i"><use href="#i-recto"/></svg></button>
   <button type="button" class="redondo" id="completa" title="Pantalla completa" aria-label="Pantalla completa"><svg class="i"><use href="#i-completa"/></svg></button>
   <button type="button" class="redondo" id="giro" title="Mirar moviendo el teléfono" aria-label="Mirar moviendo el teléfono" aria-pressed="false" hidden><svg class="i"><use href="#i-mover"/></svg></button>
@@ -143,8 +148,10 @@
     <button type="button" class="obturador" id="capturar" title="Sacar foto" aria-label="Sacar foto"><span></span></button>
     <div class="der"><button type="button" class="redondo" id="cerrarEncuadre" title="Cerrar" aria-label="Cerrar encuadre"><svg class="i"><use href="#i-cerrar"/></svg></button></div>
   </div>
+  <a class="original" href="{% url 'descargar' album.token foto.uid %}"><svg class="i"><use href="#i-bajar"/></svg>o descargar la foto 360 completa</a>
 </section>
 
+<button type="button" class="redondo" id="salirCompleta" title="Salir de pantalla completa" aria-label="Salir de pantalla completa"><svg class="i"><use href="#i-contraer"/></svg></button>
 <div class="flota vidrio" id="toast" hidden><span class="ok"></span><span id="toastTxt"></span></div>
 
 <script>
@@ -180,8 +187,6 @@
     visor.cambiarModo(b.dataset.modo);
   }));
 
-  $("mas").onclick = () => visor.zoom(-0.08);
-  $("menos").onclick = () => visor.zoom(0.08);
   const recto = $("recto");
   recto.setAttribute("aria-pressed", visor.recto);
   recto.onclick = () => {
@@ -190,9 +195,21 @@
     guardar("visor360-recto", visor.recto ? "1" : "0");
   };
 
-  const completa = $("completa");
-  if (!document.fullscreenEnabled) completa.hidden = true;
-  completa.onclick = () => document.fullscreenElement ? document.exitFullscreen() : document.documentElement.requestFullscreen();
+  // Pantalla completa: se esconde todo menos el botón para salir. En iPhone (sin pantalla completa
+  // del navegador) igual se esconden los controles.
+  const inmersivo = (si) => {
+    if (si && !hoja.hidden) cerrarEncuadre();
+    document.body.classList.toggle("inmersivo", si);
+  };
+  $("completa").onclick = () => {
+    if (document.fullscreenEnabled) document.documentElement.requestFullscreen().catch(() => inmersivo(true));
+    else inmersivo(true);
+  };
+  $("salirCompleta").onclick = () => {
+    if (document.fullscreenElement) document.exitFullscreen();
+    inmersivo(false);
+  };
+  document.addEventListener("fullscreenchange", () => inmersivo(!!document.fullscreenElement));
 
   // Giroscopio: en iPhone requiere permiso explícito con un toque.
   const giro = $("giro");
