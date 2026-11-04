@@ -25,6 +25,10 @@ def ruta_vista_chica(instance, filename):
     return ruta_foto(instance, filename, "_4k")
 
 
+def ruta_portada(instance, filename):
+    return f"albums/{instance.token}/portada_{uuid.uuid4().hex[:12]}.jpg"
+
+
 def ruta_miniatura(instance, filename):
     return ruta_foto(instance, filename, "_thumb")
 
@@ -34,6 +38,8 @@ class Album(models.Model):
     descripcion = models.TextField(blank=True)
     token = models.CharField(max_length=40, unique=True, default=nuevo_token, editable=False)
     creado = models.DateTimeField(auto_now_add=True)
+    # Encuadre elegido desde el visor; si no hay, se usa la primera foto.
+    imagen_portada = models.ImageField(upload_to=ruta_portada, blank=True)
 
     class Meta:
         ordering = ["-creado"]
@@ -44,6 +50,22 @@ class Album(models.Model):
     @property
     def portada(self):
         return self.fotos.first()
+
+    @property
+    def portada_url(self):
+        """Imagen grande para la cabecera del álbum."""
+        if self.imagen_portada:
+            return self.imagen_portada.url
+        p = self.portada
+        return p.vista_chica.url if p else ""
+
+    @property
+    def portada_miniatura_url(self):
+        """Imagen chica para tarjetas y vista previa de WhatsApp."""
+        if self.imagen_portada:
+            return self.imagen_portada.url
+        p = self.portada
+        return p.miniatura.url if p else ""
 
 
 class Foto(models.Model):

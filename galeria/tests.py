@@ -109,6 +109,29 @@ class GaleriaTests(TestCase):
         self.assertIn('IMG_20250904_172646_00_021.jpg', r["Content-Disposition"])
         self.assertEqual(timezone.localtime(foto.tomada).strftime("%Y-%m-%d %H:%M"), "2025-09-04 17:26")
 
+    def test_portada_desde_visor(self):
+        self.client.login(username="marcelo", password="clave-larga-123")
+        self.client.post(f"/album/{self.album.pk}/subir/", {"foto": jpg(2000, 1000)})
+        foto = Foto.objects.get()
+        t = self.album.token
+        self.assertContains(self.client.get(f"/a/{t}/{foto.uid.hex}/"), "usarPortada")
+        r = self.client.post(f"/album/{self.album.pk}/portada/", {"imagen": jpg(1600, 900, "p.jpg")},
+                             HTTP_X_REQUESTED_WITH="fetch")
+        self.assertEqual(r.status_code, 200)
+        self.album.refresh_from_db()
+        self.assertTrue(self.album.imagen_portada)
+        self.client.logout()
+        self.assertContains(self.client.get(f"/a/{t}/"), self.album.imagen_portada.url)
+        self.assertNotContains(self.client.get(f"/a/{t}/{foto.uid.hex}/"), "usarPortada")
+        r = self.client.post(f"/album/{self.album.pk}/portada/", {"imagen": jpg(1600, 900, "p.jpg")})
+        self.assertEqual(r.status_code, 302)  # sin sesión no se puede cambiar
+        self.client.login(username="marcelo", password="clave-larga-123")
+        viejo = self.album.imagen_portada.name
+        self.client.post(f"/album/{self.album.pk}/portada/")
+        self.album.refresh_from_db()
+        self.assertFalse(self.album.imagen_portada)
+        self.assertFalse(foto.original.storage.exists(viejo))
+
     def test_insp_sin_calibracion(self):
         img = Image.new("RGB", (1488, 744))
         d = ImageDraw.Draw(img)

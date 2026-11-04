@@ -71,6 +71,9 @@
   .acciones { display: grid; grid-template-columns: 1fr auto 1fr; align-items: center; }
   .acciones .izq { justify-self: start; display: flex; gap: 8px; }
   .acciones .der { justify-self: end; }
+  .extras { display: flex; flex-wrap: wrap; align-items: center; justify-content: center; gap: 6px 14px; }
+  .extras .chip { color: var(--texto); border-color: rgba(255, 255, 255, .12); height: 32px; font-size: .8rem; }
+  .extras .chip svg { width: 16px; height: 16px; }
   .original { display: inline-flex; align-items: center; justify-content: center; gap: 6px; color: var(--tenue); font-size: .78rem; }
   .original svg { width: 15px; height: 15px; }
   .original:hover { color: var(--suave); }
@@ -144,7 +147,10 @@
     <button type="button" class="obturador" id="capturar" title="Sacar foto" aria-label="Sacar foto"><span></span></button>
     <div class="der"><button type="button" class="redondo" id="cerrarEncuadre" title="Cerrar" aria-label="Cerrar encuadre"><svg class="i"><use href="#i-cerrar"/></svg></button></div>
   </div>
-  <a class="original" href="{% url 'descargar' album.token foto.uid %}"><svg class="i"><use href="#i-bajar"/></svg>o descargar la foto 360 completa</a>
+  <div class="extras">
+    {% if user.is_authenticated %}<button type="button" class="chip" id="usarPortada"><svg class="i"><use href="#i-normal"/></svg>Usar de portada del álbum</button>{% endif %}
+    <a class="original" href="{% url 'descargar' album.token foto.uid %}"><svg class="i"><use href="#i-bajar"/></svg>o descargar la foto 360 completa</a>
+  </div>
 </section>
 
 <button type="button" class="redondo" id="salirCompleta" title="Salir de pantalla completa" aria-label="Salir de pantalla completa"><svg class="i"><use href="#i-contraer"/></svg></button>
@@ -305,6 +311,30 @@
       boton.disabled = false;
     }
   };
+
+  {% if user.is_authenticated %}
+  const usarPortada = $("usarPortada");
+  usarPortada.onclick = async () => {
+    usarPortada.disabled = true;
+    try {
+      const blob = await visor.capturar({
+        fx: fraccion.fx, fy: fraccion.fy, ladoLargo: 2400,
+        urlAlta: "{{ foto.original.url }}", anchoAlta: {{ foto.ancho|default:0 }},
+      });
+      $("flash").classList.remove("on"); void $("flash").offsetWidth; $("flash").classList.add("on");
+      const datos = new FormData();
+      datos.append("imagen", new File([blob], "portada.jpg", { type: "image/jpeg" }));
+      const r = await fetch("{% url 'poner_portada' album.pk %}", {
+        method: "POST", body: datos, headers: { "X-CSRFToken": "{{ csrf_token }}", "X-Requested-With": "fetch" },
+      });
+      avisar(r.ok ? "Listo: es la nueva portada del álbum" : "No se pudo guardar la portada");
+    } catch (e) {
+      avisar("No se pudo guardar la portada");
+    } finally {
+      usarPortada.disabled = false;
+    }
+  };
+  {% endif %}
 
   document.addEventListener("keydown", (e) => {
     const ir = (id) => { const a = $(id); if (a) location.href = a.getAttribute("href"); };

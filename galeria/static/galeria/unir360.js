@@ -52,7 +52,7 @@
           c++;
         }
         if (!c) return null;
-        const g = [-s[2], -s[0], s[1]];
+        const g = [s[2], -s[0], s[1]];
         const ng = Math.hypot(g[0], g[1], g[2]);
         return g.map((x) => x / ng);
       }

@@ -75,7 +75,7 @@ def leer_gravedad(datos):
     if not len(acc):
         return None
     acc = (acc / np.linalg.norm(acc, axis=1)[:, None]).mean(0)
-    g = np.array([-acc[2], -acc[0], acc[1]])
+    g = np.array([acc[2], -acc[0], acc[1]])
     return g / np.linalg.norm(g)
 
 

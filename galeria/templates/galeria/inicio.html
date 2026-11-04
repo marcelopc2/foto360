@@ -27,9 +27,7 @@
 <div class="grilla aparece">
   {% for album in albums %}
   <a class="tarjeta" href="{% url 'album_admin' album.pk %}">
-    {% with p=album.portada %}
-      {% if p %}<img class="foto" src="{{ p.miniatura.url }}" alt="" loading="lazy">{% else %}<div class="foto"></div>{% endif %}
-    {% endwith %}
+    {% if album.portada_miniatura_url %}<img class="foto" src="{{ album.portada_miniatura_url }}" alt="" loading="lazy">{% else %}<div class="foto"></div>{% endif %}
     <span class="insignia">{{ album.fotos.all|length }} foto{{ album.fotos.all|length|pluralize }}</span>
     <div class="pie">
       <div><strong>{{ album.titulo }}</strong><span class="tenue">{{ album.creado|date:"j M Y" }}</span></div>

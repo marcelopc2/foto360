@@ -3,10 +3,11 @@
 {% block head %}
 <meta property="og:title" content="{{ album.titulo }}">
 <meta property="og:description" content="{{ fotos|length }} foto{{ fotos|length|pluralize }} 360">
-{% with p=album.portada %}{% if p %}<meta property="og:image" content="{{ request.scheme }}://{{ request.get_host }}{{ p.miniatura.url }}">{% endif %}{% endwith %}
+{% if album.portada_miniatura_url %}<meta property="og:image" content="{{ request.scheme }}://{{ request.get_host }}{{ album.portada_miniatura_url }}">{% endif %}
 <style>
   .portada { position: relative; display: block; border-radius: 26px; overflow: hidden; margin-bottom: 18px; color: var(--texto); }
   .portada img { width: 100%; aspect-ratio: 2 / 1; object-fit: cover; max-height: 62vh; }
+  .portada.propia img { aspect-ratio: auto; max-height: 70vh; }
   .portada .texto { position: absolute; left: 0; right: 0; bottom: 0; padding: 22px; background: rgba(16, 16, 18, .62); backdrop-filter: blur(8px); }
   .portada h1 { font-size: clamp(1.5rem, 4.5vw, 2.4rem); }
   .portada .abrir { position: absolute; top: 16px; right: 16px; }
@@ -18,8 +19,8 @@
 <div class="aparece">
   {% if fotos %}
     {% with primera=fotos.0 %}
-    <a class="portada" href="{% url 'visor' album.token primera.uid.hex %}">
-      <img src="{{ primera.vista_chica.url }}" alt="">
+    <a class="portada{% if album.imagen_portada %} propia{% endif %}" href="{% url 'visor' album.token primera.uid.hex %}">
+      <img src="{{ album.portada_url }}" alt="">
       <span class="boton primario abrir"><svg class="i"><use href="#i-ojo"/></svg>Recorrer</span>
       <div class="texto">
         <h1>{{ album.titulo }}</h1>

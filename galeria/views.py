@@ -1,11 +1,14 @@
 import shutil
+from io import BytesIO
 
 from django.conf import settings
 from django.contrib import messages
 from django.contrib.auth.decorators import login_required
+from django.core.files.base import ContentFile
 from django.http import FileResponse, JsonResponse
 from django.shortcuts import get_object_or_404, redirect, render
 from django.views.decorators.http import require_POST
+from PIL import Image, ImageOps
 
 from .imagenes import FotoInvalida, procesar
 from .models import Album, Foto, nuevo_token
@@ -71,6 +74,34 @@ def borrar_foto(request, pk):
 
 @login_required
 @require_POST
+def poner_portada(request, pk):
+    """Guarda como portada del álbum el encuadre enviado desde el visor (o la quita si no viene imagen)."""
+    album = get_object_or_404(Album, pk=pk)
+    archivo = request.FILES.get("imagen")
+    anterior = album.imagen_portada.name if album.imagen_portada else None
+    if archivo:
+        try:
+            img = Image.open(archivo)
+            img = ImageOps.exif_transpose(img).convert("RGB")
+        except Exception:
+            return JsonResponse({"ok": False, "error": "La imagen no es válida."}, status=400)
+        img.thumbnail((2400, 2400), Image.LANCZOS)
+        buf = BytesIO()
+        img.save(buf, "JPEG", quality=88, optimize=True, progressive=True)
+        album.imagen_portada.save("portada.jpg", ContentFile(buf.getvalue()), save=True)
+    else:
+        album.imagen_portada = ""
+        album.save()
+    if anterior:
+        album.imagen_portada.storage.delete(anterior)
+    if request.headers.get("x-requested-with") == "fetch":
+        return JsonResponse({"ok": True})
+    messages.success(request, "Portada actualizada." if archivo else "Portada quitada: se usa la primera foto.")
+    return redirect("album_admin", pk=album.pk)
+
+
+@login_required
+@require_POST
 def borrar_album(request, pk):
     album = get_object_or_404(Album, pk=pk)
     for foto in album.fotos.all():
@@ -98,6 +129,9 @@ def nuevo_enlace(request, pk):
             f = getattr(foto, campo)
             f.name = f.name.replace(viejo.name, album.token, 1)
         foto.save()
+    if album.imagen_portada:
+        album.imagen_portada.name = album.imagen_portada.name.replace(viejo.name, album.token, 1)
+        album.save()
     messages.success(request, "Link nuevo generado. El anterior ya no funciona.")
     return redirect("album_admin", pk=album.pk)
 
